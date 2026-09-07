@@ -1,7 +1,6 @@
 # Sandbox CMakeLists.txt
 
-project(Sandbox)
-set(TARGET_NAME ${PROJECT_NAME})
+set(TARGET_NAME Sandbox)
 
 # Collect the source files
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
@@ -14,14 +13,15 @@ file(GLOB_RECURSE HEADERS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/Include/*.hpp"
 )
 
-# Creating the executable
+# Creating the executable, main comes from the engine archive
 add_executable(${TARGET_NAME} ${SOURCES} ${HEADERS})
 
-# Include directories
-target_include_directories(${TARGET_NAME}
-    PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/Include"
-)
+# IDE source layout
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Source"  PREFIX "Source"  FILES ${SOURCES})
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Include" PREFIX "Include" FILES ${HEADERS})
+
+# Include directory
+target_include_directories(${TARGET_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Include")
 
 # Linking executable against the engine
 target_link_libraries(${TARGET_NAME} PRIVATE Engine)
@@ -32,7 +32,8 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${OUTPUT_BASE}"
 
     # Set C++ standard
-    CMAKE_CXX_STANDARD 26
-    CMAKE_CXX_STANDARD_REQUIRED ON
-    CMAKE_CXX_EXTENSIONS OFF
+    CXX_EXTENSIONS OFF
+
+    # Set debugger working directory
+    VS_DEBUGGER_WORKING_DIRECTORY "${OUTPUT_BASE}"
 )
