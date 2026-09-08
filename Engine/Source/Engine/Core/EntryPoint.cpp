@@ -25,14 +25,14 @@ int main(int argumentCount, char** arguments)
 			return 1;
 		}
 
-		l_Application->Initialize();
-
 		if (l_Application->IsInitialized())
 		{
 			l_Application->Run();
 		}
 		else
 		{
+			PT_CORE_ERROR("Fatal error: application failed to initialize");
+
 			l_ExitCode = 1;
 		}
 	}
@@ -53,6 +53,8 @@ int main(int argumentCount, char** arguments)
 	{
 		l_Application->Shutdown();
 	}
+
+	Engine::Log::Shutdown();
 
 	return l_ExitCode;
 }

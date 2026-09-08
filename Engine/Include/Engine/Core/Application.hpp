@@ -5,7 +5,7 @@
 
 namespace Engine
 {
-	// Defined in Source/Core/Application.cpp
+	// Defined in Application.cpp
 	struct ApplicationState;
 
 	struct ApplicationSpecification
@@ -21,13 +21,13 @@ namespace Engine
 	class Application
 	{
 	public:
-		explicit Application(const ApplicationSpecification& specification = {});
+		Application();
 		~Application();
 
 		Application(const Application&) = delete;
 		Application& operator=(const Application&) = delete;
 
-		void Initialize();
+		void Initialize(const ApplicationSpecification& specification = {});
 		void Shutdown();
 
 		void Run();
@@ -45,6 +45,6 @@ namespace Engine
 		std::unique_ptr<ApplicationState> m_State;
 	};
 
-	// Implemented by the client, called by the engine entry point
+	// Implemented by the client
 	std::unique_ptr<Application> CreateApplication(int argumentCount, char** arguments);
 }

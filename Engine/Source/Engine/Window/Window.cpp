@@ -34,6 +34,7 @@ namespace Engine
 			return;
 		}
 
+		glfwDefaultWindowHints();
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 		glfwWindowHint(GLFW_RESIZABLE, m_Specification.Resizable ? GLFW_TRUE : GLFW_FALSE);
 
@@ -49,7 +50,7 @@ namespace Engine
 		// GLFW may grant a different size than requested
 		glfwGetWindowSize(m_NativeWindowHandle, &m_Specification.Width, &m_Specification.Height);
 
-		PT_CORE_TRACE("Created window \"{}\" ({}x{})", m_Specification.Title, m_Specification.Width, m_Specification.Height);
+		PT_CORE_TRACE("Created window {} {}x{}", m_Specification.Title, m_Specification.Width, m_Specification.Height);
 
 		PT_CORE_INFO("------- WINDOW INITIALIZED -------");
 	}
@@ -91,6 +92,34 @@ namespace Engine
 		{
 			glfwSetWindowShouldClose(m_NativeWindowHandle, GLFW_TRUE);
 		}
+	}
+
+	int Window::GetWidth() const
+	{
+		if (!m_NativeWindowHandle)
+		{
+			return 0;
+		}
+
+		int l_Width = 0;
+		int l_Height = 0;
+		glfwGetWindowSize(m_NativeWindowHandle, &l_Width, &l_Height);
+
+		return l_Width;
+	}
+
+	int Window::GetHeight() const
+	{
+		if (!m_NativeWindowHandle)
+		{
+			return 0;
+		}
+
+		int l_Width = 0;
+		int l_Height = 0;
+		glfwGetWindowSize(m_NativeWindowHandle, &l_Width, &l_Height);
+
+		return l_Height;
 	}
 
 	void Window::GetFramebufferSize(int& Width, int& Height) const

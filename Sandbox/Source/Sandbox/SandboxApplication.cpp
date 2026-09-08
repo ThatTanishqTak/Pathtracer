@@ -13,6 +13,9 @@ namespace Engine
 		l_Specification.WindowHeight = 1080;
 		l_Specification.WindowResizable = false;
 
-		return std::make_unique<Application>(l_Specification);
+		auto l_Application = std::make_unique<Application>();
+		l_Application->Initialize(l_Specification);
+
+		return l_Application;
 	}
 }

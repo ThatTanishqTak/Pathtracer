@@ -40,6 +40,11 @@ namespace Engine
 		template<typename... Arguments>
 		static void Write(LogCategory category, LogLevel level, std::format_string<Arguments...> format, Arguments&&... values)
 		{
+			if (!IsInitialized() || level < GetLevel())
+			{
+				return;
+			}
+
 			Dispatch(category, level, std::format(format, std::forward<Arguments>(values)...));
 		}
 

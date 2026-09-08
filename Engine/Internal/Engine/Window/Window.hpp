@@ -24,7 +24,7 @@ namespace Engine
 	{
 	public:
 		Window() = default;
-		~Window();
+		~Window() = default;
 
 		Window(const Window&) = delete;
 		Window& operator=(const Window&) = delete;
@@ -43,8 +43,8 @@ namespace Engine
 		bool IsValid() const { return m_NativeWindowHandle != nullptr; }
 
 		// Screen coordinates
-		int GetWidth() const { return m_Specification.Width; }
-		int GetHeight() const { return m_Specification.Height; }
+		int GetWidth() const;
+		int GetHeight() const;
 
 		// Pixels, required for the swapchain extent
 		void GetFramebufferSize(int& Width, int& Height) const;

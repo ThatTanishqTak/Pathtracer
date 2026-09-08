@@ -16,23 +16,22 @@ namespace Engine
 		bool Running = false;
 	};
 
-	Application::Application(const ApplicationSpecification& specification) : m_State(std::make_unique<ApplicationState>())
+	Application::Application() : m_State(std::make_unique<ApplicationState>())
 	{
-		m_State->Specification = specification;
+
 	}
 
-	Application::~Application()
-	{
-		Shutdown();
-	}
+	Application::~Application() = default;
 
-	void Application::Initialize()
+	void Application::Initialize(const ApplicationSpecification& specification)
 	{
 		if (m_State->Initialized)
 		{
 			return;
 		}
-		
+
+		m_State->Specification = specification;
+
 		PT_CORE_INFO("------- INITIALIZING APPLICATION -------");
 
 		Platform::Initialize();
@@ -76,7 +75,6 @@ namespace Engine
 
 		PT_CORE_INFO("------- SHUTTING DOWN APPLICATION -------");
 
-		// Reverse order of initialization
 		if (m_State->MainWindow)
 		{
 			m_State->MainWindow->Shutdown();
@@ -90,7 +88,6 @@ namespace Engine
 
 		PT_CORE_INFO("------- APPLICATION SHUTDOWN COMPLETE -------");
 
-		// Last, so the lines above still reach a live logger
 		Log::Shutdown();
 	}
 
