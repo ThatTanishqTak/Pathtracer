@@ -32,9 +32,7 @@ namespace Engine
 		{
 			return;
 		}
-
-		Log::Initialize();
-
+		
 		PT_CORE_INFO("------- INITIALIZING APPLICATION -------");
 
 		Platform::Initialize();

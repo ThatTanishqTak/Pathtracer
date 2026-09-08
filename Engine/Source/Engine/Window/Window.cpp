@@ -7,11 +7,6 @@
 
 namespace Engine
 {
-	Window::~Window()
-	{
-		Shutdown();
-	}
-
 	void Window::Initialize(const WindowSpecification& specification)
 	{
 		if (m_NativeWindowHandle)

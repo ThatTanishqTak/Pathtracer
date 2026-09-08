@@ -1,5 +1,7 @@
 #include "Engine/Core/Application.hpp"
 
+#include "Engine/Core/Log.hpp"
+
 #include <exception>
 #include <iostream>
 #include <memory>
@@ -12,11 +14,13 @@ int main(int argumentCount, char** arguments)
 
 	try
 	{
+		Engine::Log::Initialize();
+
 		l_Application = Engine::CreateApplication(argumentCount, arguments);
 
 		if (!l_Application)
 		{
-			std::cerr << "Fatal error: CreateApplication returned null\n";
+			PT_CORE_ERROR("Fatal error: CreateApplication returned null");
 
 			return 1;
 		}
@@ -32,15 +36,15 @@ int main(int argumentCount, char** arguments)
 			l_ExitCode = 1;
 		}
 	}
-	catch (const std::exception& Exception)
+	catch (const std::exception& exception)
 	{
-		std::cerr << "Fatal error: " << Exception.what() << '\n';
+		PT_CORE_ERROR("Fatal error: {}", exception.what());
 
 		l_ExitCode = 1;
 	}
 	catch (...)
 	{
-		std::cerr << "Fatal error: unknown exception\n";
+		PT_CORE_ERROR("Fatal error: unknown exception");
 
 		l_ExitCode = 1;
 	}
