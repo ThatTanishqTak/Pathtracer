@@ -21,22 +21,37 @@ namespace Engine
 			switch (level)
 			{
 				case LogLevel::Trace:
+				{
 					return spdlog::level::trace;
+				}
 				case LogLevel::Info:
+				{
 					return spdlog::level::info;
+				}
 				case LogLevel::Warn:
+				{
 					return spdlog::level::warn;
+				}
 				case LogLevel::Error:
+				{
 					return spdlog::level::err;
+				}
 				case LogLevel::Critical:
+				{
 					return spdlog::level::critical;
+				}
 				case LogLevel::Off:
+				{
 					return spdlog::level::off;
+				}
 			}
 
 			return spdlog::level::info;
 		}
 	}
+
+	Log::Log() = default;
+	Log::~Log() = default;
 
 	void Log::Initialize()
 	{

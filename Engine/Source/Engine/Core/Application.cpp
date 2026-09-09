@@ -3,6 +3,7 @@
 #include "Engine/Core/Log.hpp"
 #include "Engine/Platform/Platform.hpp"
 #include "Engine/Window/Window.hpp"
+#include "Engine/Renderer/Renderer.hpp"
 
 namespace Engine
 {
@@ -38,7 +39,7 @@ namespace Engine
 
 		if (!Platform::IsInitialized())
 		{
-			PT_CORE_CRITICAL("Platform initialization failed, aborting startup");
+			PT_CORE_CRITICAL("Failed to initialize platform, aborting startup");
 
 			return;
 		}
@@ -54,13 +55,16 @@ namespace Engine
 
 		if (!m_State->MainWindow->IsValid())
 		{
-			PT_CORE_CRITICAL("Window initialization failed, aborting startup");
+			PT_CORE_CRITICAL("Failed to initialize window, aborting startup");
 
 			m_State->MainWindow.reset();
 			Platform::Shutdown();
 
 			return;
 		}
+
+		m_Renderer = std::make_unique<Renderer>();
+		m_Renderer->Initialize();
 
 		m_State->Initialized = true;
 
@@ -75,6 +79,12 @@ namespace Engine
 		}
 
 		PT_CORE_INFO("------- SHUTTING DOWN APPLICATION -------");
+
+		if (m_Renderer)
+		{
+			m_Renderer->Shutdown();
+			m_Renderer.reset();
+		}
 
 		if (m_State->MainWindow)
 		{
@@ -106,6 +116,8 @@ namespace Engine
 		while (m_State->Running && !m_State->MainWindow->ShouldClose())
 		{
 			m_State->MainWindow->WaitEvents();
+
+			m_Renderer->Render();
 		}
 
 		m_State->Running = false;

@@ -59,6 +59,9 @@ namespace Engine
 		}
 	}
 
+	Platform::Platform() = default;
+	Platform::~Platform() = default;
+
 	void Platform::Initialize()
 	{
 		if (s_Initialized)
@@ -71,7 +74,7 @@ namespace Engine
 		// Installed before SDL_Init so initialization failures are captured
 		SDL_SetLogOutputFunction(&SDLLogOutput, nullptr);
 
-		if (!SDL_Init(SDL_INIT_VIDEO))
+		if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
 		{
 			PT_CORE_CRITICAL("Failed to initialize SDL: {}", SDL_GetError());
 

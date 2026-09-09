@@ -40,4 +40,12 @@ add_subdirectory(spdlog SYSTEM)
 # --------------
 
 # Vulkan --------------
+find_package(Vulkan REQUIRED GLOBAL)
+
+# volk: runtime Vulkan function loader
+set(VOLK_PULL_IN_VULKAN ON)
+add_subdirectory(volk SYSTEM)
+
+# VMA: Vulkan memory allocator, header-only interface target
+add_subdirectory(VulkanMemoryAllocator SYSTEM)
 # --------------

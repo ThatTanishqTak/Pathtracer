@@ -7,6 +7,9 @@
 
 namespace Engine
 {
+	Window::Window() = default;
+	Window::~Window() = default;
+
 	void Window::Initialize(const WindowSpecification& specification)
 	{
 		if (m_NativeWindowHandle)
@@ -35,9 +38,7 @@ namespace Engine
 			return;
 		}
 
-		// No graphics API flag; SDL only attaches a context when asked (add SDL_WINDOW_VULKAN once the swapchain lands)
-		SDL_WindowFlags l_Flags = 0;
-
+		SDL_WindowFlags l_Flags = SDL_WINDOW_VULKAN;
 		if (m_Specification.Resizable)
 		{
 			l_Flags |= SDL_WINDOW_RESIZABLE;
@@ -55,7 +56,8 @@ namespace Engine
 		// SDL may grant a different size than requested
 		SDL_GetWindowSize(m_NativeWindowHandle, &m_Specification.Width, &m_Specification.Height);
 
-		PT_CORE_TRACE("Created window {} {}x{}", m_Specification.Title, m_Specification.Width, m_Specification.Height);
+		PT_CORE_TRACE("Window Title: {}", m_Specification.Title);
+		PT_CORE_TRACE("Window Resolution: {}x{}", m_Specification.Width, m_Specification.Height);
 
 		PT_CORE_INFO("------- WINDOW INITIALIZED -------");
 	}
@@ -84,7 +86,6 @@ namespace Engine
 			case SDL_EVENT_QUIT:
 			{
 				m_ShouldClose = true;
-
 				break;
 			}
 			case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
@@ -93,23 +94,12 @@ namespace Engine
 				{
 					m_ShouldClose = true;
 				}
-
 				break;
 			}
 			default:
 			{
 				break;
 			}
-		}
-	}
-
-	void Window::PollEvents()
-	{
-		SDL_Event l_Event;
-
-		while (SDL_PollEvent(&l_Event))
-		{
-			HandleEvent(l_Event);
 		}
 	}
 

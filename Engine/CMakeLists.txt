@@ -39,12 +39,15 @@ target_include_directories(${TARGET_NAME}
 target_compile_features(${TARGET_NAME} PUBLIC cxx_std_23)
 
 # Unlocks the internal headers, never set on consumers
-target_compile_definitions(${TARGET_NAME} PRIVATE PT_ENGINE_BUILD)
+target_compile_definitions(${TARGET_NAME} PRIVATE PT_ENGINE_BUILD VK_NO_PROTOTYPES $<$<CONFIG:Debug>:PT_DEBUG>)
 
 # Third-party libraries
 target_link_libraries(${TARGET_NAME}
     PRIVATE 
         SDL3::SDL3
+        Vulkan::Headers
+        volk::volk
+        GPUOpen::VulkanMemoryAllocator
         spdlog
 )
 

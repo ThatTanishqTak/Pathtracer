@@ -18,6 +18,8 @@ namespace Engine
 		bool WindowResizable = false;
 	};
 
+	class Renderer;
+
 	class Application
 	{
 	public:
@@ -43,6 +45,7 @@ namespace Engine
 
 	private:
 		std::unique_ptr<ApplicationState> m_State;
+		std::unique_ptr<Renderer> m_Renderer;
 	};
 
 	// Implemented by the client

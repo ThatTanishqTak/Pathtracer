@@ -10,7 +10,8 @@ namespace Engine
 	class Platform
 	{
 	public:
-		Platform() = delete;
+		Platform();
+		~Platform();
 
 		static void Initialize();
 		static void Shutdown();

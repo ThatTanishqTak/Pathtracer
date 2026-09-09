@@ -24,8 +24,8 @@ namespace Engine
 	class Window
 	{
 	public:
-		Window() = default;
-		~Window() = default;
+		Window();
+		~Window();
 
 		Window(const Window&) = delete;
 		Window& operator=(const Window&) = delete;
@@ -36,7 +36,6 @@ namespace Engine
 		void Initialize(const WindowSpecification& specification = {});
 		void Shutdown();
 
-		void PollEvents();
 		void WaitEvents();
 		bool ShouldClose() const;
 		void RequestClose();
