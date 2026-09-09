@@ -44,7 +44,7 @@ target_compile_definitions(${TARGET_NAME} PRIVATE PT_ENGINE_BUILD)
 # Third-party libraries
 target_link_libraries(${TARGET_NAME}
     PRIVATE 
-        glfw
+        SDL3::SDL3
         spdlog
 )
 

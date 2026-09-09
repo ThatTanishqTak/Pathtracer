@@ -57,6 +57,7 @@ namespace Engine
 			PT_CORE_CRITICAL("Window initialization failed, aborting startup");
 
 			m_State->MainWindow.reset();
+			Platform::Shutdown();
 
 			return;
 		}
@@ -68,7 +69,7 @@ namespace Engine
 
 	void Application::Shutdown()
 	{
-		if (!Log::IsInitialized() && !m_State->MainWindow && !Platform::IsInitialized())
+		if (!m_State->MainWindow && !Platform::IsInitialized())
 		{
 			return;
 		}
@@ -87,8 +88,6 @@ namespace Engine
 		m_State->Running = false;
 
 		PT_CORE_INFO("------- APPLICATION SHUTDOWN COMPLETE -------");
-
-		Log::Shutdown();
 	}
 
 	void Application::Run()
@@ -106,7 +105,7 @@ namespace Engine
 
 		while (m_State->Running && !m_State->MainWindow->ShouldClose())
 		{
-			m_State->MainWindow->PollEvents();
+			m_State->MainWindow->WaitEvents();
 		}
 
 		m_State->Running = false;

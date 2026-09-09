@@ -3,7 +3,7 @@
 #include "Engine/Core/Log.hpp"
 #include "Engine/Platform/Platform.hpp"
 
-#include <GLFW/glfw3.h>
+#include <SDL3/SDL.h>
 
 namespace Engine
 {
@@ -26,6 +26,7 @@ namespace Engine
 		}
 
 		m_Specification = specification;
+		m_ShouldClose = false;
 
 		if (m_Specification.Width <= 0 || m_Specification.Height <= 0)
 		{
@@ -34,21 +35,25 @@ namespace Engine
 			return;
 		}
 
-		glfwDefaultWindowHints();
-		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-		glfwWindowHint(GLFW_RESIZABLE, m_Specification.Resizable ? GLFW_TRUE : GLFW_FALSE);
+		// No graphics API flag; SDL only attaches a context when asked (add SDL_WINDOW_VULKAN once the swapchain lands)
+		SDL_WindowFlags l_Flags = 0;
 
-		m_NativeWindowHandle = glfwCreateWindow(m_Specification.Width, m_Specification.Height, m_Specification.Title.c_str(), nullptr, nullptr);
+		if (m_Specification.Resizable)
+		{
+			l_Flags |= SDL_WINDOW_RESIZABLE;
+		}
+
+		m_NativeWindowHandle = SDL_CreateWindow(m_Specification.Title.c_str(), m_Specification.Width, m_Specification.Height, l_Flags);
 
 		if (!m_NativeWindowHandle)
 		{
-			PT_CORE_ERROR("Failed to create native window handle");
+			PT_CORE_ERROR("Failed to create native window handle: {}", SDL_GetError());
 
 			return;
 		}
 
-		// GLFW may grant a different size than requested
-		glfwGetWindowSize(m_NativeWindowHandle, &m_Specification.Width, &m_Specification.Height);
+		// SDL may grant a different size than requested
+		SDL_GetWindowSize(m_NativeWindowHandle, &m_Specification.Width, &m_Specification.Height);
 
 		PT_CORE_TRACE("Created window {} {}x{}", m_Specification.Title, m_Specification.Width, m_Specification.Height);
 
@@ -64,16 +69,69 @@ namespace Engine
 
 		PT_CORE_INFO("------- SHUTTING DOWN WINDOW -------");
 
-		glfwDestroyWindow(m_NativeWindowHandle);
+		SDL_DestroyWindow(m_NativeWindowHandle);
 
 		m_NativeWindowHandle = nullptr;
+		m_ShouldClose = false;
 
 		PT_CORE_INFO("------- WINDOW SHUTDOWN COMPLETE -------");
 	}
 
+	void Window::HandleEvent(const SDL_Event& event)
+	{
+		switch (event.type)
+		{
+			case SDL_EVENT_QUIT:
+			{
+				m_ShouldClose = true;
+
+				break;
+			}
+			case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+			{
+				if (m_NativeWindowHandle && event.window.windowID == SDL_GetWindowID(m_NativeWindowHandle))
+				{
+					m_ShouldClose = true;
+				}
+
+				break;
+			}
+			default:
+			{
+				break;
+			}
+		}
+	}
+
 	void Window::PollEvents()
 	{
-		glfwPollEvents();
+		SDL_Event l_Event;
+
+		while (SDL_PollEvent(&l_Event))
+		{
+			HandleEvent(l_Event);
+		}
+	}
+
+	void Window::WaitEvents()
+	{
+		SDL_Event l_Event;
+
+		// Blocks until at least one event arrives
+		if (!SDL_WaitEvent(&l_Event))
+		{
+			PT_CORE_ERROR("SDL_WaitEvent failed: {}", SDL_GetError());
+
+			return;
+		}
+
+		HandleEvent(l_Event);
+
+		// Drain whatever else queued up while blocked
+		while (SDL_PollEvent(&l_Event))
+		{
+			HandleEvent(l_Event);
+		}
 	}
 
 	bool Window::ShouldClose() const
@@ -83,14 +141,14 @@ namespace Engine
 			return true;
 		}
 
-		return glfwWindowShouldClose(m_NativeWindowHandle) != 0;
+		return m_ShouldClose;
 	}
 
 	void Window::RequestClose()
 	{
 		if (m_NativeWindowHandle)
 		{
-			glfwSetWindowShouldClose(m_NativeWindowHandle, GLFW_TRUE);
+			m_ShouldClose = true;
 		}
 	}
 
@@ -103,7 +161,7 @@ namespace Engine
 
 		int l_Width = 0;
 		int l_Height = 0;
-		glfwGetWindowSize(m_NativeWindowHandle, &l_Width, &l_Height);
+		SDL_GetWindowSize(m_NativeWindowHandle, &l_Width, &l_Height);
 
 		return l_Width;
 	}
@@ -117,7 +175,7 @@ namespace Engine
 
 		int l_Width = 0;
 		int l_Height = 0;
-		glfwGetWindowSize(m_NativeWindowHandle, &l_Width, &l_Height);
+		SDL_GetWindowSize(m_NativeWindowHandle, &l_Width, &l_Height);
 
 		return l_Height;
 	}
@@ -129,7 +187,7 @@ namespace Engine
 
 		if (m_NativeWindowHandle)
 		{
-			glfwGetFramebufferSize(m_NativeWindowHandle, &Width, &Height);
+			SDL_GetWindowSizeInPixels(m_NativeWindowHandle, &Width, &Height);
 		}
 	}
 }

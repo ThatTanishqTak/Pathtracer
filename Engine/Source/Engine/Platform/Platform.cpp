@@ -2,7 +2,7 @@
 
 #include "Engine/Core/Log.hpp"
 
-#include <GLFW/glfw3.h>
+#include <SDL3/SDL.h>
 
 namespace Engine
 {
@@ -10,9 +10,52 @@ namespace Engine
 
 	namespace
 	{
-		void GLFWErrorCallback(int errorCode, const char* description)
+		void SDLLogOutput(void* userData, int category, SDL_LogPriority priority, const char* message)
 		{
-			PT_CORE_ERROR("GLFW error ({}): {}", errorCode, description ? description : "<null>");
+			(void)userData;
+			(void)category;
+
+			const char* l_Message = message ? message : "<null>";
+
+			switch (priority)
+			{
+				case SDL_LOG_PRIORITY_TRACE:
+				case SDL_LOG_PRIORITY_VERBOSE:
+				{
+					PT_CORE_TRACE("SDL: {}", l_Message);
+					break;
+				}
+				case SDL_LOG_PRIORITY_DEBUG:
+				{
+					PT_CORE_TRACE("SDL: {}", l_Message);
+					break;
+				}
+				case SDL_LOG_PRIORITY_INFO:
+				{
+					PT_CORE_INFO("SDL: {}", l_Message);
+					break;
+				}
+				case SDL_LOG_PRIORITY_WARN:
+				{
+					PT_CORE_WARN("SDL: {}", l_Message);
+					break;
+				}
+				case SDL_LOG_PRIORITY_ERROR:
+				{
+					PT_CORE_ERROR("SDL: {}", l_Message);
+					break;
+				}
+				case SDL_LOG_PRIORITY_CRITICAL:
+				{
+					PT_CORE_CRITICAL("SDL: {}", l_Message);
+					break;
+				}
+				default:
+				{
+					PT_CORE_INFO("SDL: {}", l_Message);
+					break;
+				}
+			}
 		}
 	}
 
@@ -25,22 +68,19 @@ namespace Engine
 
 		PT_CORE_INFO("------- INITIALIZING PLATFORM -------");
 
-		// Installed before glfwInit to catch initialization errors
-		glfwSetErrorCallback(&GLFWErrorCallback);
+		// Installed before SDL_Init so initialization failures are captured
+		SDL_SetLogOutputFunction(&SDLLogOutput, nullptr);
 
-		if (!glfwInit())
+		if (!SDL_Init(SDL_INIT_VIDEO))
 		{
-			PT_CORE_CRITICAL("Failed to initialize GLFW");
+			PT_CORE_CRITICAL("Failed to initialize SDL: {}", SDL_GetError());
 
 			return;
 		}
 
-		int l_Major = 0;
-		int l_Minor = 0;
-		int l_Revision = 0;
-		glfwGetVersion(&l_Major, &l_Minor, &l_Revision);
+		const int l_Version = SDL_GetVersion();
 
-		PT_CORE_TRACE("GLFW {}.{}.{}", l_Major, l_Minor, l_Revision);
+		PT_CORE_TRACE("SDL {}.{}.{}", SDL_VERSIONNUM_MAJOR(l_Version), SDL_VERSIONNUM_MINOR(l_Version), SDL_VERSIONNUM_MICRO(l_Version));
 
 		s_Initialized = true;
 
@@ -56,8 +96,8 @@ namespace Engine
 
 		PT_CORE_INFO("------- SHUTTING DOWN PLATFORM -------");
 
-		glfwTerminate();
-		glfwSetErrorCallback(nullptr);
+		SDL_Quit();
+		SDL_SetLogOutputFunction(SDL_GetDefaultLogOutputFunction(), nullptr);
 
 		s_Initialized = false;
 

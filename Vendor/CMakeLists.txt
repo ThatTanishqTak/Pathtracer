@@ -3,13 +3,27 @@
 # IDE folder for all vendor targets
 set(CMAKE_FOLDER "Vendor")
 
-# glfw --------------
-set(GLFW_BUILD_DOCS OFF)
-set(GLFW_BUILD_TESTS OFF)
-set(GLFW_BUILD_EXAMPLES OFF)
-set(GLFW_INSTALL OFF)
+# SDL3 --------------
+set(SDL_SHARED OFF)
+set(SDL_STATIC ON)
+set(SDL_TEST_LIBRARY OFF)
+set(SDL_TESTS OFF)
+set(SDL_EXAMPLES OFF)
+set(SDL_INSTALL OFF)
 
-add_subdirectory(glfw SYSTEM)
+# Only the windowing/video subsystem is used
+set(SDL_AUDIO OFF)
+set(SDL_JOYSTICK OFF)
+set(SDL_HAPTIC OFF)
+set(SDL_HIDAPI OFF)
+set(SDL_SENSOR OFF)
+set(SDL_CAMERA OFF)
+set(SDL_POWER OFF)
+set(SDL_DIALOG OFF)
+set(SDL_RENDER OFF)
+set(SDL_GPU OFF)
+
+add_subdirectory(SDL SYSTEM)
 # --------------
 
 # spdlog --------------

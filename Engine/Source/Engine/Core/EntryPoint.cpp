@@ -22,10 +22,9 @@ int main(int argumentCount, char** arguments)
 		{
 			PT_CORE_ERROR("Fatal error: CreateApplication returned null");
 
-			return 1;
+			l_ExitCode = 1;
 		}
-
-		if (l_Application->IsInitialized())
+		else if (l_Application->IsInitialized())
 		{
 			l_Application->Run();
 		}

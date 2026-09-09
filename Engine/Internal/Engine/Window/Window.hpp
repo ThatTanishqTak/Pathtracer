@@ -6,7 +6,8 @@
 
 #include <string>
 
-struct GLFWwindow;
+struct SDL_Window;
+union SDL_Event;
 
 namespace Engine
 {
@@ -36,10 +37,11 @@ namespace Engine
 		void Shutdown();
 
 		void PollEvents();
+		void WaitEvents();
 		bool ShouldClose() const;
 		void RequestClose();
 
-		GLFWwindow* GetNativeWindow() const { return m_NativeWindowHandle; }
+		SDL_Window* GetNativeWindow() const { return m_NativeWindowHandle; }
 		bool IsValid() const { return m_NativeWindowHandle != nullptr; }
 
 		// Screen coordinates
@@ -52,7 +54,12 @@ namespace Engine
 		const WindowSpecification& GetSpecification() const { return m_Specification; }
 
 	private:
-		GLFWwindow* m_NativeWindowHandle = nullptr;
+		void HandleEvent(const SDL_Event& event);
+
+		SDL_Window* m_NativeWindowHandle = nullptr;
+
+		// SDL delivers close requests as events, so the window tracks the flag itself
+		bool m_ShouldClose = false;
 
 		WindowSpecification m_Specification;
 	};
