@@ -27,7 +27,7 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Source"   PREFIX "Source"   FILES
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Include"  PREFIX "Include"  FILES ${HEADERS})
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Internal" PREFIX "Internal" FILES ${INTERNALS})
 
-# Include directories, only Include is visible to consumers
+# Include directories, only Include is visible to sandbox
 target_include_directories(${TARGET_NAME}
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/Include"
@@ -38,7 +38,13 @@ target_include_directories(${TARGET_NAME}
 # C++ standard
 target_compile_features(${TARGET_NAME} PUBLIC cxx_std_23)
 
-# Unlocks the internal headers, never set on consumers
+# Warnings
+target_compile_options(${TARGET_NAME} PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
+)
+
+# Unlocks the internal headers
 target_compile_definitions(${TARGET_NAME} PRIVATE PT_ENGINE_BUILD VK_NO_PROTOTYPES $<$<CONFIG:Debug>:PT_DEBUG>)
 
 # Third-party libraries

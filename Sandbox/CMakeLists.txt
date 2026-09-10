@@ -13,7 +13,7 @@ file(GLOB_RECURSE HEADERS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/Include/*.hpp"
 )
 
-# Creating the executable, main comes from the engine archive
+# Create the executable
 add_executable(${TARGET_NAME} ${SOURCES} ${HEADERS})
 
 # IDE source layout
@@ -25,6 +25,12 @@ target_include_directories(${TARGET_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/I
 
 # Linking executable against the engine
 target_link_libraries(${TARGET_NAME} PRIVATE Engine)
+
+# Warnings
+target_compile_options(${TARGET_NAME} PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
+)
 
 # Sandbox properties
 set_target_properties(${TARGET_NAME} PROPERTIES

@@ -103,21 +103,11 @@ namespace Engine
 		}
 	}
 
-	void Window::WaitEvents()
+	void Window::PollEvents()
 	{
 		SDL_Event l_Event;
 
-		// Blocks until at least one event arrives
-		if (!SDL_WaitEvent(&l_Event))
-		{
-			PT_CORE_ERROR("SDL_WaitEvent failed: {}", SDL_GetError());
-
-			return;
-		}
-
-		HandleEvent(l_Event);
-
-		// Drain whatever else queued up while blocked
+		// Drain the queue without blocking so the render loop runs every frame
 		while (SDL_PollEvent(&l_Event))
 		{
 			HandleEvent(l_Event);
@@ -170,14 +160,14 @@ namespace Engine
 		return l_Height;
 	}
 
-	void Window::GetFramebufferSize(int& Width, int& Height) const
+	void Window::GetFramebufferSize(int& width, int& height) const
 	{
-		Width = 0;
-		Height = 0;
+		width = 0;
+		height = 0;
 
 		if (m_NativeWindowHandle)
 		{
-			SDL_GetWindowSizeInPixels(m_NativeWindowHandle, &Width, &Height);
+			SDL_GetWindowSizeInPixels(m_NativeWindowHandle, &width, &height);
 		}
 	}
 }

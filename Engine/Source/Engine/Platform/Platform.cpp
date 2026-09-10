@@ -99,7 +99,7 @@ namespace Engine
 
 		PT_CORE_INFO("------- SHUTTING DOWN PLATFORM -------");
 
-		SDL_Quit();
+		SDL_QuitSubSystem(SDL_INIT_VIDEO);
 		SDL_SetLogOutputFunction(SDL_GetDefaultLogOutputFunction(), nullptr);
 
 		s_Initialized = false;

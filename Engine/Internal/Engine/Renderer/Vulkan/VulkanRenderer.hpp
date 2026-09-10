@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef PT_ENGINE_BUILD
+#error "Engine internal header, not part of the public API"
+#endif
+
 #include <memory>
 
 namespace Engine

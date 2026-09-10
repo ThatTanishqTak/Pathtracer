@@ -51,6 +51,11 @@ namespace Engine
 
 		static void Write(LogCategory category, LogLevel level, std::string_view message)
 		{
+			if (!IsInitialized() || level < GetLevel())
+			{
+				return;
+			}
+
 			Dispatch(category, level, std::string(message));
 		}
 

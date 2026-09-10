@@ -184,17 +184,34 @@ namespace Engine
 
 		extensions.clear();
 
+		std::vector<VkExtensionProperties> l_Available;
 		uint32_t l_AvailableCount = 0;
+		VkResult l_EnumerateResult = VK_INCOMPLETE;
 
-		if (vkEnumerateInstanceExtensionProperties(nullptr, &l_AvailableCount, nullptr) != VK_SUCCESS)
+		// The set can change between the count and fill calls, VK_INCOMPLETE means retry
+		do
+		{
+			l_EnumerateResult = vkEnumerateInstanceExtensionProperties(nullptr, &l_AvailableCount, nullptr);
+
+			if (l_EnumerateResult != VK_SUCCESS)
+			{
+				break;
+			}
+
+			l_Available.resize(l_AvailableCount);
+			l_EnumerateResult = vkEnumerateInstanceExtensionProperties(nullptr, &l_AvailableCount, l_Available.data());
+		}
+		while (l_EnumerateResult == VK_INCOMPLETE);
+
+		if (l_EnumerateResult != VK_SUCCESS)
 		{
 			PT_CORE_CRITICAL("Failed to enumerate instance extensions");
 
 			return;
 		}
 
-		std::vector<VkExtensionProperties> l_Available(l_AvailableCount);
-		vkEnumerateInstanceExtensionProperties(nullptr, &l_AvailableCount, l_Available.data());
+		// The fill call wrote back the count it actually delivered
+		l_Available.resize(l_AvailableCount);
 
 		uint32_t l_WindowExtensionCount = 0;
 		const char* const* l_WindowExtensions = SDL_Vulkan_GetInstanceExtensions(&l_WindowExtensionCount);
@@ -244,17 +261,34 @@ namespace Engine
 		layers.clear();
 
 #ifdef PT_DEBUG
+		std::vector<VkLayerProperties> l_Available;
 		uint32_t l_AvailableCount = 0;
+		VkResult l_EnumerateResult = VK_INCOMPLETE;
 
-		if (vkEnumerateInstanceLayerProperties(&l_AvailableCount, nullptr) != VK_SUCCESS)
+		// The set can change between the count and fill calls, VK_INCOMPLETE means retry
+		do
+		{
+			l_EnumerateResult = vkEnumerateInstanceLayerProperties(&l_AvailableCount, nullptr);
+
+			if (l_EnumerateResult != VK_SUCCESS)
+			{
+				break;
+			}
+
+			l_Available.resize(l_AvailableCount);
+			l_EnumerateResult = vkEnumerateInstanceLayerProperties(&l_AvailableCount, l_Available.data());
+		}
+		while (l_EnumerateResult == VK_INCOMPLETE);
+
+		if (l_EnumerateResult != VK_SUCCESS)
 		{
 			PT_CORE_WARN("Failed to enumerate instance layers, validation is disabled");
 
 			return;
 		}
 
-		std::vector<VkLayerProperties> l_Available(l_AvailableCount);
-		vkEnumerateInstanceLayerProperties(&l_AvailableCount, l_Available.data());
+		// The fill call wrote back the count it actually delivered
+		l_Available.resize(l_AvailableCount);
 
 		if (!IsLayerSupported(l_Available, k_ValidationLayerName))
 		{
@@ -365,6 +399,7 @@ namespace Engine
 	VKAPI_ATTR VkBool32 VKAPI_CALL VulkanInstance::DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT types, const VkDebugUtilsMessengerCallbackDataEXT* callbackData, void* userData)
 	{
 		(void)userData;
+		(void)types;
 		
 		const char* l_Message = (callbackData && callbackData->pMessage) ? callbackData->pMessage : "<null>";
 		if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)

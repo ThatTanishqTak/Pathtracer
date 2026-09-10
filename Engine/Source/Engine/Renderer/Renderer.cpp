@@ -19,8 +19,11 @@ namespace Engine
 
 	void Renderer::Shutdown()
 	{
-		m_VulkanRenderer->Shutdown();
-		m_VulkanRenderer.reset();
+		if (m_VulkanRenderer)
+		{
+			m_VulkanRenderer->Shutdown();
+			m_VulkanRenderer.reset();
+		}
 	}
 
 	void Renderer::Render()

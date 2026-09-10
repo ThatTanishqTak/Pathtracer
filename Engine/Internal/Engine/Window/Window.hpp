@@ -36,7 +36,7 @@ namespace Engine
 		void Initialize(const WindowSpecification& specification = {});
 		void Shutdown();
 
-		void WaitEvents();
+		void PollEvents();
 		bool ShouldClose() const;
 		void RequestClose();
 

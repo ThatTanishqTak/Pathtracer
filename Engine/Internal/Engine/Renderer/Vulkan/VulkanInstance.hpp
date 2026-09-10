@@ -36,7 +36,6 @@ namespace Engine
 		void SetupDebugMessenger(const std::vector<const char*>& extensions);
 
 		static VkDebugUtilsMessengerCreateInfoEXT MakeDebugMessengerCreateInfo();
-
 		static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT types, const VkDebugUtilsMessengerCallbackDataEXT* callbackData, void* userData);
 
 	private:

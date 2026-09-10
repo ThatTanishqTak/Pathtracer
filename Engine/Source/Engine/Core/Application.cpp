@@ -46,8 +46,8 @@ namespace Engine
 
 		WindowSpecification l_WindowSpecification;
 		l_WindowSpecification.Title = m_State->Specification.Name;
-		l_WindowSpecification.Width = static_cast<int>(m_State->Specification.WindowWidth);
-		l_WindowSpecification.Height = static_cast<int>(m_State->Specification.WindowHeight);
+		l_WindowSpecification.Width = m_State->Specification.WindowWidth;
+		l_WindowSpecification.Height = m_State->Specification.WindowHeight;
 		l_WindowSpecification.Resizable = m_State->Specification.WindowResizable;
 
 		m_State->MainWindow = std::make_unique<Window>();
@@ -115,7 +115,7 @@ namespace Engine
 
 		while (m_State->Running && !m_State->MainWindow->ShouldClose())
 		{
-			m_State->MainWindow->WaitEvents();
+			m_State->MainWindow->PollEvents();
 
 			m_Renderer->Render();
 		}

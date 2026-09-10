@@ -12,8 +12,8 @@ namespace Engine
 	{
 		std::string Name = "Pathtracer";
 
-		unsigned int WindowWidth = 1920;
-		unsigned int WindowHeight = 1080;
+		int WindowWidth = 1920;
+		int WindowHeight = 1080;
 
 		bool WindowResizable = false;
 	};

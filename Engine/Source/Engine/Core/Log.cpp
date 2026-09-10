@@ -73,7 +73,11 @@ namespace Engine
 		s_ClientLogger->flush_on(spdlog::level::warn);
 		spdlog::register_logger(s_ClientLogger);
 
+#ifdef PT_DEBUG
 		s_Level = LogLevel::Trace;
+#else
+		s_Level = LogLevel::Info;
+#endif
 		s_Initialized = true;
 	}
 
