@@ -1,6 +1,7 @@
 #include "Engine/Renderer/Vulkan/VulkanInstance.hpp"
 
 #include "Engine/Core/Log.hpp"
+#include "Engine/Window/Window.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 
@@ -58,11 +59,18 @@ namespace Engine
 	VulkanInstance::VulkanInstance() = default;
 	VulkanInstance::~VulkanInstance() = default;
 
-	void VulkanInstance::Initialize()
+	void VulkanInstance::Initialize(const Window& window)
 	{
 		if (m_Instance != VK_NULL_HANDLE)
 		{
 			PT_CORE_WARN("Vulkan instance is already initialized");
+
+			return;
+		}
+
+		if (!window.IsValid())
+		{
+			PT_CORE_CRITICAL("A valid window is required to initialize the Vulkan instance");
 
 			return;
 		}

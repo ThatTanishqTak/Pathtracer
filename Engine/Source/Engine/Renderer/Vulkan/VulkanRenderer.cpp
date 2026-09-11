@@ -8,10 +8,12 @@ namespace Engine
 	VulkanRenderer::VulkanRenderer() = default;
 	VulkanRenderer::~VulkanRenderer() = default;
 
-	void VulkanRenderer::Initialize()
+	void VulkanRenderer::Initialize(const Window& window)
 	{
+		m_Window = &window;
+
 		m_VulkanInstance = std::make_unique<VulkanInstance>();
-		m_VulkanInstance->Initialize();
+		m_VulkanInstance->Initialize(window);
 	}
 
 	void VulkanRenderer::Shutdown()
@@ -21,5 +23,7 @@ namespace Engine
 			m_VulkanInstance->Shutdown();
 			m_VulkanInstance.reset();
 		}
+
+		m_Window = nullptr;
 	}
 }

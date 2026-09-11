@@ -10,6 +10,8 @@
 
 namespace Engine
 {
+	class Window;
+
 	class VulkanInstance
 	{
 	public:
@@ -21,7 +23,7 @@ namespace Engine
 		VulkanInstance(VulkanInstance&&) = delete;
 		VulkanInstance& operator=(VulkanInstance&&) = delete;
 
-		void Initialize();
+		void Initialize(const Window& window);
 		void Shutdown();
 
 		bool IsInitialized() const { return m_Instance != VK_NULL_HANDLE; }

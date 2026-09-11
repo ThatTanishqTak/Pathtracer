@@ -11,10 +11,10 @@ namespace Engine
 	Renderer::Renderer() = default;
 	Renderer::~Renderer() = default;
 
-	void Renderer::Initialize()
+	void Renderer::Initialize(const Window& window)
 	{
 		m_VulkanRenderer = std::make_unique<VulkanRenderer>();
-		m_VulkanRenderer->Initialize();
+		m_VulkanRenderer->Initialize(window);
 	}
 
 	void Renderer::Shutdown()

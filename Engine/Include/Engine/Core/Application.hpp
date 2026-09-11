@@ -5,9 +5,6 @@
 
 namespace Engine
 {
-	// Defined in Application.cpp
-	struct ApplicationState;
-
 	struct ApplicationSpecification
 	{
 		std::string Name = "Pathtracer";
@@ -19,6 +16,7 @@ namespace Engine
 	};
 
 	class Renderer;
+	class Window;
 
 	class Application
 	{
@@ -44,8 +42,13 @@ namespace Engine
 		const ApplicationSpecification& GetSpecification() const;
 
 	private:
-		std::unique_ptr<ApplicationState> m_State;
+		ApplicationSpecification m_Specification;
+
+		std::unique_ptr<Window> m_Window;
 		std::unique_ptr<Renderer> m_Renderer;
+
+		bool m_Initialized = false;
+		bool m_Running = false;
 	};
 
 	// Implemented by the client

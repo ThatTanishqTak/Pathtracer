@@ -5,6 +5,7 @@
 namespace Engine
 {
 	class VulkanRenderer;
+	class Window;
 
 	class Renderer
 	{
@@ -12,7 +13,7 @@ namespace Engine
 		Renderer();
 		~Renderer();
 
-		void Initialize();
+		void Initialize(const Window& window);
 		void Shutdown();
 
 		void Render();

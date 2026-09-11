@@ -7,31 +7,17 @@
 
 namespace Engine
 {
-	struct ApplicationState
-	{
-		ApplicationSpecification Specification;
-
-		std::unique_ptr<Window> MainWindow;
-
-		bool Initialized = false;
-		bool Running = false;
-	};
-
-	Application::Application() : m_State(std::make_unique<ApplicationState>())
-	{
-
-	}
-
+	Application::Application() = default;
 	Application::~Application() = default;
 
 	void Application::Initialize(const ApplicationSpecification& specification)
 	{
-		if (m_State->Initialized)
+		if (m_Initialized)
 		{
 			return;
 		}
 
-		m_State->Specification = specification;
+		m_Specification = specification;
 
 		PT_CORE_INFO("------- INITIALIZING APPLICATION -------");
 
@@ -45,35 +31,35 @@ namespace Engine
 		}
 
 		WindowSpecification l_WindowSpecification;
-		l_WindowSpecification.Title = m_State->Specification.Name;
-		l_WindowSpecification.Width = m_State->Specification.WindowWidth;
-		l_WindowSpecification.Height = m_State->Specification.WindowHeight;
-		l_WindowSpecification.Resizable = m_State->Specification.WindowResizable;
+		l_WindowSpecification.Title = m_Specification.Name;
+		l_WindowSpecification.Width = m_Specification.WindowWidth;
+		l_WindowSpecification.Height = m_Specification.WindowHeight;
+		l_WindowSpecification.Resizable = m_Specification.WindowResizable;
 
-		m_State->MainWindow = std::make_unique<Window>();
-		m_State->MainWindow->Initialize(l_WindowSpecification);
+		m_Window = std::make_unique<Window>();
+		m_Window->Initialize(l_WindowSpecification);
 
-		if (!m_State->MainWindow->IsValid())
+		if (!m_Window->IsValid())
 		{
 			PT_CORE_CRITICAL("Failed to initialize window, aborting startup");
 
-			m_State->MainWindow.reset();
+			m_Window.reset();
 			Platform::Shutdown();
 
 			return;
 		}
 
 		m_Renderer = std::make_unique<Renderer>();
-		m_Renderer->Initialize();
+		m_Renderer->Initialize(*m_Window);
 
-		m_State->Initialized = true;
+		m_Initialized = true;
 
 		PT_CORE_INFO("------- APPLICATION INITIALIZED -------");
 	}
 
 	void Application::Shutdown()
 	{
-		if (!m_State->MainWindow && !Platform::IsInitialized())
+		if (!m_Window && !Platform::IsInitialized())
 		{
 			return;
 		}
@@ -86,23 +72,23 @@ namespace Engine
 			m_Renderer.reset();
 		}
 
-		if (m_State->MainWindow)
+		if (m_Window)
 		{
-			m_State->MainWindow->Shutdown();
-			m_State->MainWindow.reset();
+			m_Window->Shutdown();
+			m_Window.reset();
 		}
 
 		Platform::Shutdown();
 
-		m_State->Initialized = false;
-		m_State->Running = false;
+		m_Initialized = false;
+		m_Running = false;
 
 		PT_CORE_INFO("------- APPLICATION SHUTDOWN COMPLETE -------");
 	}
 
 	void Application::Run()
 	{
-		if (!m_State->Initialized)
+		if (!m_Initialized)
 		{
 			PT_CORE_ERROR("Run called before a successful Initialize");
 
@@ -111,57 +97,57 @@ namespace Engine
 
 		PT_CORE_INFO("------- ENTERING MAIN LOOP -------");
 
-		m_State->Running = true;
+		m_Running = true;
 
-		while (m_State->Running && !m_State->MainWindow->ShouldClose())
+		while (m_Running && !m_Window->ShouldClose())
 		{
-			m_State->MainWindow->PollEvents();
+			m_Window->PollEvents();
 
 			m_Renderer->Render();
 		}
 
-		m_State->Running = false;
+		m_Running = false;
 
 		PT_CORE_INFO("------- EXITING MAIN LOOP -------");
 	}
 
 	void Application::Close()
 	{
-		m_State->Running = false;
+		m_Running = false;
 
-		if (m_State->MainWindow)
+		if (m_Window)
 		{
-			m_State->MainWindow->RequestClose();
+			m_Window->RequestClose();
 		}
 	}
 
 	bool Application::IsInitialized() const
 	{
-		return m_State->Initialized;
+		return m_Initialized;
 	}
 
 	unsigned int Application::GetWindowWidth() const
 	{
-		if (!m_State->MainWindow)
+		if (!m_Window)
 		{
 			return 0;
 		}
 
-		return static_cast<unsigned int>(m_State->MainWindow->GetWidth());
+		return static_cast<unsigned int>(m_Window->GetWidth());
 	}
 
 	unsigned int Application::GetWindowHeight() const
 	{
-		if (!m_State->MainWindow)
+		if (!m_Window)
 		{
 			return 0;
 		}
 
-		return static_cast<unsigned int>(m_State->MainWindow->GetHeight());
+		return static_cast<unsigned int>(m_Window->GetHeight());
 	}
 
 	const ApplicationSpecification& Application::GetSpecification() const
 	{
-		return m_State->Specification;
+		return m_Specification;
 	}
 }

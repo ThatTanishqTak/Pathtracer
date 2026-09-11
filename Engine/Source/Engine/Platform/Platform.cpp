@@ -22,37 +22,37 @@ namespace Engine
 				case SDL_LOG_PRIORITY_TRACE:
 				case SDL_LOG_PRIORITY_VERBOSE:
 				{
-					PT_CORE_TRACE("SDL: {}", l_Message);
+					PT_CORE_TRACE("[SDL]: {}", l_Message);
 					break;
 				}
 				case SDL_LOG_PRIORITY_DEBUG:
 				{
-					PT_CORE_TRACE("SDL: {}", l_Message);
+					PT_CORE_TRACE("[SDL]: {}", l_Message);
 					break;
 				}
 				case SDL_LOG_PRIORITY_INFO:
 				{
-					PT_CORE_INFO("SDL: {}", l_Message);
+					PT_CORE_INFO("[SDL]: {}", l_Message);
 					break;
 				}
 				case SDL_LOG_PRIORITY_WARN:
 				{
-					PT_CORE_WARN("SDL: {}", l_Message);
+					PT_CORE_WARN("[SDL]: {}", l_Message);
 					break;
 				}
 				case SDL_LOG_PRIORITY_ERROR:
 				{
-					PT_CORE_ERROR("SDL: {}", l_Message);
+					PT_CORE_ERROR("[SDL]: {}", l_Message);
 					break;
 				}
 				case SDL_LOG_PRIORITY_CRITICAL:
 				{
-					PT_CORE_CRITICAL("SDL: {}", l_Message);
+					PT_CORE_CRITICAL("[SDL]: {}", l_Message);
 					break;
 				}
 				default:
 				{
-					PT_CORE_INFO("SDL: {}", l_Message);
+					PT_CORE_INFO("[SDL]: {}", l_Message);
 					break;
 				}
 			}
@@ -83,7 +83,7 @@ namespace Engine
 
 		const int l_Version = SDL_GetVersion();
 
-		PT_CORE_TRACE("SDL {}.{}.{}", SDL_VERSIONNUM_MAJOR(l_Version), SDL_VERSIONNUM_MINOR(l_Version), SDL_VERSIONNUM_MICRO(l_Version));
+		PT_CORE_TRACE("[SDL]: {}.{}.{}", SDL_VERSIONNUM_MAJOR(l_Version), SDL_VERSIONNUM_MINOR(l_Version), SDL_VERSIONNUM_MICRO(l_Version));
 
 		s_Initialized = true;
 

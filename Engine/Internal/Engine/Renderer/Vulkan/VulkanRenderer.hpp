@@ -9,6 +9,7 @@
 namespace Engine
 {
 	class VulkanInstance;
+	class Window;
 
 	class VulkanRenderer
 	{
@@ -16,10 +17,12 @@ namespace Engine
 		VulkanRenderer();
 		~VulkanRenderer();
 
-		void Initialize();
+		void Initialize(const Window& window);
 		void Shutdown();
 
 	private:
 		std::unique_ptr<VulkanInstance> m_VulkanInstance;
+
+		const Window* m_Window = nullptr;
 	};
 }
