@@ -55,12 +55,15 @@ namespace Engine
 			return;
 		}
 
-		CreateImageSemaphores(swapchain.GetImageCount());
-		if (m_RenderFinishedSemaphores.empty())
+		if (swapchain.GetImageCount() > 0)
 		{
-			Shutdown();
+			CreateImageSemaphores(swapchain.GetImageCount());
+			if (m_RenderFinishedSemaphores.empty())
+			{
+				Shutdown();
 
-			return;
+				return;
+			}
 		}
 
 		PT_CORE_TRACE("Frames In Flight: {}", k_MaxFramesInFlight);
@@ -130,7 +133,7 @@ namespace Engine
 
 		RehookBinarySemaphores();
 
-		if (m_ImageAvailableSemaphores.empty() || m_RenderFinishedSemaphores.empty())
+		if (m_ImageAvailableSemaphores.empty())
 		{
 			return false;
 		}
@@ -162,7 +165,7 @@ namespace Engine
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.semaphore = m_ImageAvailableSemaphores[GetFrameIndex()],
 			.value = 0,
-			.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT,
 		};
 
 		VkSemaphoreSubmitInfo l_SignalSemaphoreInfos[2]

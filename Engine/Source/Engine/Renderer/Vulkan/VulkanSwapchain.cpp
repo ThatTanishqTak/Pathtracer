@@ -109,7 +109,7 @@ namespace Engine
 
 	void VulkanSwapchain::Initialize(const VulkanDevice& device, const VulkanSurface& surface, const Window& window)
 	{
-		if (m_Swapchain != VK_NULL_HANDLE)
+		if (m_Device != nullptr)
 		{
 			PT_CORE_WARN("Vulkan swapchain is already initialized");
 
@@ -146,6 +146,13 @@ namespace Engine
 		CreateSwapchain();
 		if (m_Swapchain == VK_NULL_HANDLE)
 		{
+			if (m_NeedsRecreate)
+			{
+				PT_CORE_INFO("------- VULKAN SWAPCHAIN INITIALIZED (CREATION DEFERRED) -------");
+
+				return;
+			}
+
 			Shutdown();
 
 			return;
@@ -291,8 +298,15 @@ namespace Engine
 	{
 		imageIndex = 0;
 
-		if (m_Swapchain == VK_NULL_HANDLE)
+		if (m_Device == nullptr)
 		{
+			return false;
+		}
+
+		if (m_NeedsRecreate || m_Swapchain == VK_NULL_HANDLE)
+		{
+			Recreate();
+
 			return false;
 		}
 
@@ -301,16 +315,6 @@ namespace Engine
 			m_NeedsRecreate = true;
 
 			return false;
-		}
-
-		if (m_NeedsRecreate)
-		{
-			Recreate();
-
-			if (m_NeedsRecreate)
-			{
-				return false;
-			}
 		}
 
 		const VkResult l_Result = vkAcquireNextImageKHR(m_Device->GetHandle(), m_Swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
@@ -358,9 +362,16 @@ namespace Engine
 
 		const VkResult l_Result = vkQueuePresentKHR(queue, &l_PresentInfo);
 
-		if (l_Result == VK_ERROR_OUT_OF_DATE_KHR || l_Result == VK_SUBOPTIMAL_KHR)
+		if (l_Result == VK_SUBOPTIMAL_KHR)
 		{
-			Recreate();
+			m_NeedsRecreate = true;
+
+			return true;
+		}
+
+		if (l_Result == VK_ERROR_OUT_OF_DATE_KHR)
+		{
+			m_NeedsRecreate = true;
 
 			return false;
 		}
@@ -422,6 +433,8 @@ namespace Engine
 		if (l_Extent.width == 0 || l_Extent.height == 0)
 		{
 			PT_CORE_TRACE("Swapchain extent is zero, deferring creation");
+
+			m_NeedsRecreate = true;
 
 			return;
 		}

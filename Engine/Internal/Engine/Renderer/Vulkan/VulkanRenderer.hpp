@@ -41,8 +41,6 @@ namespace Engine
 		std::unique_ptr<VulkanSwapchain> m_VulkanSwapchain;
 		std::unique_ptr<VulkanSynchronization> m_VulkanSynchronization;
 
-		const Window* m_Window = nullptr;
-
 		bool m_VolkInitialized = false;
 	};
 }

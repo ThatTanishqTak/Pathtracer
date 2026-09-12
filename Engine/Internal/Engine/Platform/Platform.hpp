@@ -19,6 +19,6 @@ namespace Engine
 		bool IsInitialized() const { return m_Initialized; }
 
 	private:
-		bool m_Initialized;
+		bool m_Initialized = false;
 	};
 }

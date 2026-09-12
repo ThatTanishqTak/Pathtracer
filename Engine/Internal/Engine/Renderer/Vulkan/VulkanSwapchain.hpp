@@ -30,7 +30,7 @@ namespace Engine
 		void Shutdown();
 		void Recreate();
 
-		bool IsInitialized() const { return m_Swapchain != VK_NULL_HANDLE; }
+		bool IsInitialized() const { return m_Device != nullptr; }
 
 		void RequestRecreate() { m_NeedsRecreate = true; }
 		bool NeedsRecreate() const { return m_NeedsRecreate; }

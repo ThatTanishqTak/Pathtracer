@@ -26,8 +26,7 @@ namespace Engine
 	class Log
 	{
 	public:
-		Log();
-		~Log();
+		Log() = delete;
 
 		static void Initialize();
 		static void Shutdown();

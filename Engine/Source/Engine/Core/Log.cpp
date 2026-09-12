@@ -50,9 +50,6 @@ namespace Engine
 		}
 	}
 
-	Log::Log() = default;
-	Log::~Log() = default;
-
 	void Log::Initialize()
 	{
 		if (s_Initialized)

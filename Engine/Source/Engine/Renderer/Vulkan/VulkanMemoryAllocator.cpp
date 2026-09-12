@@ -35,6 +35,10 @@ namespace Engine
 		PT_CORE_INFO("------- INITIALIZING VULKAN MEMORY ALLOCATOR -------");
 
 		CreateAllocator(instance, device);
+		if (m_VulkanMemoryAllocator == VK_NULL_HANDLE)
+		{
+			return;
+		}
 
 		PT_CORE_INFO("------- VULKAN MEMORY ALLOCATOR INITIALIZED -------");
 	}

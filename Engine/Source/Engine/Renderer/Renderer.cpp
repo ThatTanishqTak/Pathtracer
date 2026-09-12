@@ -11,6 +11,13 @@ namespace Engine
 
 	void Renderer::Initialize(const Window& window)
 	{
+		if (m_VulkanRenderer)
+		{
+			PT_CORE_WARN("Renderer is already initialized");
+
+			return;
+		}
+
 		m_VulkanRenderer = std::make_unique<VulkanRenderer>();
 		m_VulkanRenderer->Initialize(window);
 	}

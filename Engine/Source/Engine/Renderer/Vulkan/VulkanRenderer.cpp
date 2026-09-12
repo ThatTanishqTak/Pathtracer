@@ -19,7 +19,12 @@ namespace Engine
 
 	void VulkanRenderer::Initialize(const Window& window)
 	{
-		m_Window = &window;
+		if (m_VolkInitialized)
+		{
+			PT_CORE_WARN("Vulkan renderer is already initialized");
+
+			return;
+		}
 
 		InitializeVolk();
 		if (!m_VolkInitialized)
@@ -122,8 +127,6 @@ namespace Engine
 		}
 
 		ShutdownVolk();
-
-		m_Window = nullptr;
 	}
 
 	void VulkanRenderer::InitializeVolk()
