@@ -3,6 +3,7 @@
 #include "Engine/Renderer/Vulkan/VulkanInstance.hpp"
 #include "Engine/Renderer/Vulkan/VulkanDevice.hpp"
 #include "Engine/Renderer/Vulkan/VulkanSurface.hpp"
+#include "Engine/Renderer/Vulkan/VulkanMemoryAllocator.hpp"
 #include "Engine/Core/Log.hpp"
 
 #include <volk.h>
@@ -40,15 +41,32 @@ namespace Engine
 
 		m_VulkanDevice = std::make_unique<VulkanDevice>();
 		m_VulkanDevice->Initialize(*m_VulkanInstance, *m_VulkanSurface);
+		if (!m_VulkanDevice->IsInitialized())
+		{
+			return;
+		}
+
+		m_VulkanMemoryAllocator = std::make_unique<VulkanMemoryAllocator>();
+		m_VulkanMemoryAllocator->Initialize(*m_VulkanInstance, *m_VulkanDevice);
+		if (!m_VulkanMemoryAllocator->IsInitialized())
+		{
+			return;
+		}
 	}
 
 	bool VulkanRenderer::IsInitialized() const
 	{
-		return m_VulkanInstance && m_VulkanInstance->IsInitialized() && m_VulkanSurface && m_VulkanSurface->IsInitialized() && m_VulkanDevice && m_VulkanDevice->IsInitialized();
+		return m_VulkanInstance && m_VulkanInstance->IsInitialized() && m_VulkanSurface && m_VulkanSurface->IsInitialized() && m_VulkanDevice && m_VulkanDevice->IsInitialized() && m_VulkanMemoryAllocator && m_VulkanMemoryAllocator->IsInitialized();
 	}
 
 	void VulkanRenderer::Shutdown()
 	{
+		if (m_VulkanMemoryAllocator)
+		{
+			m_VulkanMemoryAllocator->Shutdown();
+			m_VulkanMemoryAllocator.reset();
+		}
+
 		if (m_VulkanDevice)
 		{
 			m_VulkanDevice->Shutdown();

@@ -12,6 +12,7 @@ namespace Engine
 	class VulkanInstance;
 	class VulkanSurface;
 	class VulkanDevice;
+	class VulkanMemoryAllocator;
 
 	class VulkanRenderer
 	{
@@ -32,6 +33,7 @@ namespace Engine
 		std::unique_ptr<VulkanInstance> m_VulkanInstance;
 		std::unique_ptr<VulkanDevice> m_VulkanDevice;
 		std::unique_ptr<VulkanSurface> m_VulkanSurface;
+		std::unique_ptr<VulkanMemoryAllocator> m_VulkanMemoryAllocator;
 
 		const Window* m_Window = nullptr;
 

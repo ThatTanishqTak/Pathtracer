@@ -45,7 +45,7 @@ target_compile_options(${TARGET_NAME} PRIVATE
 )
 
 # Unlocks the internal headers
-target_compile_definitions(${TARGET_NAME} PRIVATE PT_ENGINE_BUILD VK_NO_PROTOTYPES $<$<CONFIG:Debug>:PT_DEBUG>)
+target_compile_definitions(${TARGET_NAME} PRIVATE PT_ENGINE_BUILD VK_NO_PROTOTYPES VMA_STATIC_VULKAN_FUNCTIONS=0 VMA_DYNAMIC_VULKAN_FUNCTIONS=1 $<$<CONFIG:Debug>:PT_DEBUG>)
 
 # Third-party libraries
 target_link_libraries(${TARGET_NAME}
