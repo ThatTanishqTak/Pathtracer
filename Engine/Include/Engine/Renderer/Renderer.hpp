@@ -20,6 +20,8 @@ namespace Engine
 
 		void Render();
 
+		void OnFramebufferResized();
+
 	private:
 		std::unique_ptr<VulkanRenderer> m_VulkanRenderer;
 	};

@@ -25,10 +25,10 @@ namespace Engine
 
 	class Log
 	{
+	public:
 		Log();
 		~Log();
 
-	public:
 		static void Initialize();
 		static void Shutdown();
 

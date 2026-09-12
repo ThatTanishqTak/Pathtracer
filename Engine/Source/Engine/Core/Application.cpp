@@ -115,6 +115,11 @@ namespace Engine
 		{
 			m_Window->PollEvents();
 
+			if (m_Window->ConsumeFramebufferResized())
+			{
+				m_Renderer->OnFramebufferResized();
+			}
+
 			m_Renderer->Render();
 		}
 

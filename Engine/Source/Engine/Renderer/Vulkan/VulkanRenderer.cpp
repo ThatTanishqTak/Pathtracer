@@ -4,6 +4,8 @@
 #include "Engine/Renderer/Vulkan/VulkanDevice.hpp"
 #include "Engine/Renderer/Vulkan/VulkanSurface.hpp"
 #include "Engine/Renderer/Vulkan/VulkanMemoryAllocator.hpp"
+#include "Engine/Renderer/Vulkan/VulkanSwapchain.hpp"
+#include "Engine/Renderer/Vulkan/VulkanSynchronization.hpp"
 #include "Engine/Core/Log.hpp"
 
 #include <volk.h>
@@ -52,15 +54,49 @@ namespace Engine
 		{
 			return;
 		}
+
+		m_VulkanSwapchain = std::make_unique<VulkanSwapchain>();
+		m_VulkanSwapchain->Initialize(*m_VulkanDevice, *m_VulkanSurface, window);
+		if (!m_VulkanSwapchain->IsInitialized())
+		{
+			return;
+		}
+
+		m_VulkanSynchronization = std::make_unique<VulkanSynchronization>();
+		m_VulkanSynchronization->Initialize(*m_VulkanDevice, *m_VulkanSwapchain);
+		if (!m_VulkanSynchronization->IsInitialized())
+		{
+			return;
+		}
 	}
 
 	bool VulkanRenderer::IsInitialized() const
 	{
-		return m_VulkanInstance && m_VulkanInstance->IsInitialized() && m_VulkanSurface && m_VulkanSurface->IsInitialized() && m_VulkanDevice && m_VulkanDevice->IsInitialized() && m_VulkanMemoryAllocator && m_VulkanMemoryAllocator->IsInitialized();
+		return m_VulkanInstance && m_VulkanInstance->IsInitialized() && m_VulkanSurface && m_VulkanSurface->IsInitialized() && m_VulkanDevice && m_VulkanDevice->IsInitialized() && m_VulkanMemoryAllocator && m_VulkanMemoryAllocator->IsInitialized() && m_VulkanSwapchain && m_VulkanSwapchain->IsInitialized() && m_VulkanSynchronization && m_VulkanSynchronization->IsInitialized();
+	}
+
+	void VulkanRenderer::OnFramebufferResized()
+	{
+		if (m_VulkanSwapchain)
+		{
+			m_VulkanSwapchain->RequestRecreate();
+		}
 	}
 
 	void VulkanRenderer::Shutdown()
 	{
+		if (m_VulkanSynchronization)
+		{
+			m_VulkanSynchronization->Shutdown();
+			m_VulkanSynchronization.reset();
+		}
+
+		if (m_VulkanSwapchain)
+		{
+			m_VulkanSwapchain->Shutdown();
+			m_VulkanSwapchain.reset();
+		}
+
 		if (m_VulkanMemoryAllocator)
 		{
 			m_VulkanMemoryAllocator->Shutdown();

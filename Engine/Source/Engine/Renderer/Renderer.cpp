@@ -33,4 +33,12 @@ namespace Engine
 	{
 
 	}
+
+	void Renderer::OnFramebufferResized()
+	{
+		if (m_VulkanRenderer)
+		{
+			m_VulkanRenderer->OnFramebufferResized();
+		}
+	}
 }

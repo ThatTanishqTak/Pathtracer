@@ -13,6 +13,8 @@ namespace Engine
 	class VulkanSurface;
 	class VulkanDevice;
 	class VulkanMemoryAllocator;
+	class VulkanSwapchain;
+	class VulkanSynchronization;
 
 	class VulkanRenderer
 	{
@@ -25,6 +27,8 @@ namespace Engine
 
 		bool IsInitialized() const;
 
+		void OnFramebufferResized();
+
 	private:
 		void InitializeVolk();
 		void ShutdownVolk();
@@ -34,6 +38,8 @@ namespace Engine
 		std::unique_ptr<VulkanDevice> m_VulkanDevice;
 		std::unique_ptr<VulkanSurface> m_VulkanSurface;
 		std::unique_ptr<VulkanMemoryAllocator> m_VulkanMemoryAllocator;
+		std::unique_ptr<VulkanSwapchain> m_VulkanSwapchain;
+		std::unique_ptr<VulkanSynchronization> m_VulkanSynchronization;
 
 		const Window* m_Window = nullptr;
 

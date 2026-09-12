@@ -17,7 +17,7 @@ namespace Engine
 
 		PT_APP_TRACE("Window Title: {}", l_Specification.Name);
 		PT_APP_TRACE("Window Resolution: {}x{}", l_Specification.WindowWidth, l_Specification.WindowHeight);
-		PT_APP_TRACE("Window Resizeable: {}", l_Specification.WindowResizable);
+		PT_APP_TRACE("Window Resizable: {}", l_Specification.WindowResizable);
 
 		auto l_Application = std::make_unique<Application>();
 		l_Application->Initialize(l_Specification);
