@@ -75,11 +75,6 @@ namespace Engine
 
 	void Application::Shutdown()
 	{
-		if (!m_Window && !m_Platform->IsInitialized())
-		{
-			return;
-		}
-
 		PT_CORE_INFO("------- SHUTTING DOWN APPLICATION -------");
 
 		if (m_Renderer)

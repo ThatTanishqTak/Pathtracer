@@ -70,7 +70,7 @@ namespace Engine
 
 		VmaAllocatorCreateInfo l_AllocatorCreateInfo
 		{
-			.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
+			.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE4_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT,
 			.physicalDevice = device.GetPhysicalDevice(),
 			.device = device.GetHandle(),
 			.pVulkanFunctions = &l_Functions,
