@@ -15,6 +15,7 @@ namespace Engine
 		bool WindowResizable = false;
 	};
 
+	class Platform;
 	class Renderer;
 	class Window;
 
@@ -44,6 +45,7 @@ namespace Engine
 	private:
 		ApplicationSpecification m_Specification;
 
+		std::unique_ptr<Platform> m_Platform;
 		std::unique_ptr<Window> m_Window;
 		std::unique_ptr<Renderer> m_Renderer;
 

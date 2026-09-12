@@ -1,9 +1,9 @@
 #include "Engine/Core/Application.hpp"
 
-#include "Engine/Core/Log.hpp"
 #include "Engine/Platform/Platform.hpp"
 #include "Engine/Window/Window.hpp"
 #include "Engine/Renderer/Renderer.hpp"
+#include "Engine/Core/Log.hpp"
 
 namespace Engine
 {
@@ -21,9 +21,9 @@ namespace Engine
 
 		PT_CORE_INFO("------- INITIALIZING APPLICATION -------");
 
-		Platform::Initialize();
-
-		if (!Platform::IsInitialized())
+		m_Platform = std::make_unique<Platform>();
+		m_Platform->Initialize();
+		if (!m_Platform->IsInitialized())
 		{
 			PT_CORE_CRITICAL("Failed to initialize platform, aborting startup");
 
@@ -38,20 +38,20 @@ namespace Engine
 
 		m_Window = std::make_unique<Window>();
 		m_Window->Initialize(l_WindowSpecification);
-
-		if (!m_Window->IsValid())
+		if (!m_Window->IsInitialized())
 		{
 			PT_CORE_CRITICAL("Failed to initialize window, aborting startup");
 
 			m_Window.reset();
-			Platform::Shutdown();
+
+			m_Platform->Shutdown();
+			m_Platform.reset();
 
 			return;
 		}
 
 		m_Renderer = std::make_unique<Renderer>();
 		m_Renderer->Initialize(*m_Window);
-
 		if (!m_Renderer->IsInitialized())
 		{
 			PT_CORE_CRITICAL("Failed to initialize renderer, aborting startup");
@@ -62,7 +62,8 @@ namespace Engine
 			m_Window->Shutdown();
 			m_Window.reset();
 
-			Platform::Shutdown();
+			m_Platform->Shutdown();
+			m_Platform.reset();
 
 			return;
 		}
@@ -74,7 +75,7 @@ namespace Engine
 
 	void Application::Shutdown()
 	{
-		if (!m_Window && !Platform::IsInitialized())
+		if (!m_Window && !m_Platform->IsInitialized())
 		{
 			return;
 		}
@@ -93,7 +94,11 @@ namespace Engine
 			m_Window.reset();
 		}
 
-		Platform::Shutdown();
+		if (m_Platform)
+		{
+			m_Platform->Shutdown();
+			m_Platform.reset();
+		}
 
 		m_Initialized = false;
 

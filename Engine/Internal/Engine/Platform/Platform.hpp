@@ -13,12 +13,12 @@ namespace Engine
 		Platform();
 		~Platform();
 
-		static void Initialize();
-		static void Shutdown();
+		void Initialize();
+		void Shutdown();
 
-		static bool IsInitialized() { return s_Initialized; }
+		bool IsInitialized() const { return m_Initialized; }
 
 	private:
-		static bool s_Initialized;
+		bool m_Initialized;
 	};
 }

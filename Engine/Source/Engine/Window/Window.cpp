@@ -21,13 +21,6 @@ namespace Engine
 
 		PT_CORE_INFO("------- INITIALIZING WINDOW -------");
 
-		if (!Platform::IsInitialized())
-		{
-			PT_CORE_ERROR("Platform must be initialized before creating a window");
-
-			return;
-		}
-
 		m_Specification = specification;
 		m_ShouldClose = false;
 		m_FramebufferResized = false;

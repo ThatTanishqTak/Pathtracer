@@ -40,7 +40,7 @@ namespace Engine
 		void RequestClose();
 
 		SDL_Window* GetNativeWindow() const { return m_NativeWindowHandle; }
-		bool IsValid() const { return m_NativeWindowHandle != nullptr; }
+		bool IsInitialized() const { return m_NativeWindowHandle != nullptr; }
 
 		int GetWidth() const;
 		int GetHeight() const;

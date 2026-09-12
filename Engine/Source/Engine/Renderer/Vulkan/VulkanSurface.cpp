@@ -27,7 +27,7 @@ namespace Engine
 			return;
 		}
 
-		if (!window.IsValid())
+		if (!window.IsInitialized())
 		{
 			PT_CORE_CRITICAL("A valid window is required to create a surface");
 

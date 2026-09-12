@@ -56,7 +56,7 @@ namespace Engine
 			return;
 		}
 
-		if (!window.IsValid())
+		if (!window.IsInitialized())
 		{
 			PT_CORE_CRITICAL("A valid window is required to initialize the Vulkan instance");
 
@@ -74,7 +74,6 @@ namespace Engine
 
 		std::vector<const char*> l_Extensions;
 		GetRequiredExtensions(l_Extensions);
-
 		if (l_Extensions.empty())
 		{
 			Shutdown();
@@ -86,7 +85,6 @@ namespace Engine
 		GetRequiredLayers(l_Layers);
 
 		CreateInstance(l_Extensions, l_Layers);
-
 		if (m_Instance == VK_NULL_HANDLE)
 		{
 			Shutdown();
@@ -94,7 +92,6 @@ namespace Engine
 			return;
 		}
 
-		// Instance level entry points, device level ones are loaded after device creation
 		volkLoadInstanceOnly(m_Instance);
 
 		SetupDebugMessenger(l_Extensions);

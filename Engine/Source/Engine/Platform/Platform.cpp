@@ -6,8 +6,6 @@
 
 namespace Engine
 {
-	bool Platform::s_Initialized = false;
-
 	namespace
 	{
 		void SDLLogOutput(void* userData, int category, SDL_LogPriority priority, const char* message)
@@ -64,7 +62,7 @@ namespace Engine
 
 	void Platform::Initialize()
 	{
-		if (s_Initialized)
+		if (m_Initialized)
 		{
 			return;
 		}
@@ -85,14 +83,14 @@ namespace Engine
 
 		PT_CORE_TRACE("[SDL]: {}.{}.{}", SDL_VERSIONNUM_MAJOR(l_Version), SDL_VERSIONNUM_MINOR(l_Version), SDL_VERSIONNUM_MICRO(l_Version));
 
-		s_Initialized = true;
+		m_Initialized = true;
 
 		PT_CORE_INFO("------- PLATFORM INITIALIZED -------");
 	}
 
 	void Platform::Shutdown()
 	{
-		if (!s_Initialized)
+		if (!m_Initialized)
 		{
 			return;
 		}
@@ -102,7 +100,7 @@ namespace Engine
 		SDL_QuitSubSystem(SDL_INIT_VIDEO);
 		SDL_SetLogOutputFunction(SDL_GetDefaultLogOutputFunction(), nullptr);
 
-		s_Initialized = false;
+		m_Initialized = false;
 
 		PT_CORE_INFO("------- PLATFORM SHUTDOWN COMPLETE -------");
 	}
