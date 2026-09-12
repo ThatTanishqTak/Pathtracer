@@ -96,6 +96,15 @@ namespace Engine
 				}
 				break;
 			}
+			case SDL_EVENT_WINDOW_RESIZED:
+			{
+				if (m_NativeWindowHandle && event.window.windowID == SDL_GetWindowID(m_NativeWindowHandle))
+				{
+					m_Specification.Width = event.window.data1;
+					m_Specification.Height = event.window.data2;
+				}
+				break;
+			}
 			default:
 			{
 				break;

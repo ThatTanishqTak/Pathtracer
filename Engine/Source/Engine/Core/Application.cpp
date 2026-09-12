@@ -52,6 +52,21 @@ namespace Engine
 		m_Renderer = std::make_unique<Renderer>();
 		m_Renderer->Initialize(*m_Window);
 
+		if (!m_Renderer->IsInitialized())
+		{
+			PT_CORE_CRITICAL("Failed to initialize renderer, aborting startup");
+
+			m_Renderer->Shutdown();
+			m_Renderer.reset();
+			
+			m_Window->Shutdown();
+			m_Window.reset();
+
+			Platform::Shutdown();
+
+			return;
+		}
+
 		m_Initialized = true;
 
 		PT_CORE_INFO("------- APPLICATION INITIALIZED -------");

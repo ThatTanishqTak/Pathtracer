@@ -17,6 +17,11 @@ namespace Engine
 		m_VulkanRenderer->Initialize(window);
 	}
 
+	bool Renderer::IsInitialized() const
+	{
+		return m_VulkanRenderer && m_VulkanRenderer->IsInitialized();
+	}
+
 	void Renderer::Shutdown()
 	{
 		if (m_VulkanRenderer)

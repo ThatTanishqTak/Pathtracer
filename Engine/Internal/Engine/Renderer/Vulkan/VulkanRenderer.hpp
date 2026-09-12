@@ -22,6 +22,8 @@ namespace Engine
 		void Initialize(const Window& window);
 		void Shutdown();
 
+		bool IsInitialized() const;
+
 	private:
 		std::unique_ptr<VulkanInstance> m_VulkanInstance;
 		std::unique_ptr<VulkanDevice> m_VulkanDevice;

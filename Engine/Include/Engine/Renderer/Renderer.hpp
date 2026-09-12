@@ -16,6 +16,8 @@ namespace Engine
 		void Initialize(const Window& window);
 		void Shutdown();
 
+		bool IsInitialized() const;
+
 		void Render();
 
 	private:

@@ -16,12 +16,25 @@ namespace Engine
 
 		m_VulkanInstance = std::make_unique<VulkanInstance>();
 		m_VulkanInstance->Initialize(window);
+		if (!m_VulkanInstance->IsInitialized())
+		{
+			return;
+		}
 
 		m_VulkanDevice = std::make_unique<VulkanDevice>();
 		m_VulkanDevice->Initialize(*m_VulkanInstance);
+		if (!m_VulkanDevice->IsInitialized())
+		{
+			return;
+		}
 
 		m_VulkanSurface = std::make_unique<VulkanSurface>();
 		m_VulkanSurface->Initialize();
+	}
+
+	bool VulkanRenderer::IsInitialized() const
+	{
+		return m_VulkanInstance && m_VulkanInstance->IsInitialized() && m_VulkanDevice && m_VulkanDevice->IsInitialized();
 	}
 
 	void VulkanRenderer::Shutdown()

@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Log.hpp"
 #include "Engine/Window/Window.hpp"
+#include "Engine/Renderer/Vulkan/VulkanUtilities.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 
@@ -12,19 +13,6 @@ namespace Engine
 {
 	namespace
 	{
-		bool IsExtensionSupported(const std::vector<VkExtensionProperties>& available, const char* name)
-		{
-			for (const VkExtensionProperties& l_Extension : available)
-			{
-				if (std::strcmp(l_Extension.extensionName, name) == 0)
-				{
-					return true;
-				}
-			}
-
-			return false;
-		}
-
 #ifdef PT_DEBUG
 		constexpr const char* k_ValidationLayerName = "VK_LAYER_KHRONOS_validation";
 
@@ -193,33 +181,12 @@ namespace Engine
 		extensions.clear();
 
 		std::vector<VkExtensionProperties> l_Available;
-		uint32_t l_AvailableCount = 0;
-		VkResult l_EnumerateResult = VK_INCOMPLETE;
-
-		// The set can change between the count and fill calls, VK_INCOMPLETE means retry
-		do
-		{
-			l_EnumerateResult = vkEnumerateInstanceExtensionProperties(nullptr, &l_AvailableCount, nullptr);
-
-			if (l_EnumerateResult != VK_SUCCESS)
-			{
-				break;
-			}
-
-			l_Available.resize(l_AvailableCount);
-			l_EnumerateResult = vkEnumerateInstanceExtensionProperties(nullptr, &l_AvailableCount, l_Available.data());
-		}
-		while (l_EnumerateResult == VK_INCOMPLETE);
-
-		if (l_EnumerateResult != VK_SUCCESS)
+		if (VulkanUtilities::Enumerate(l_Available, [](uint32_t* count, VkExtensionProperties* data) { return vkEnumerateInstanceExtensionProperties(nullptr, count, data); }) != VK_SUCCESS)
 		{
 			PT_CORE_CRITICAL("Failed to enumerate instance extensions");
 
 			return;
 		}
-
-		// The fill call wrote back the count it actually delivered
-		l_Available.resize(l_AvailableCount);
 
 		uint32_t l_WindowExtensionCount = 0;
 		const char* const* l_WindowExtensions = SDL_Vulkan_GetInstanceExtensions(&l_WindowExtensionCount);
@@ -233,7 +200,7 @@ namespace Engine
 
 		for (uint32_t i = 0; i < l_WindowExtensionCount; i++)
 		{
-			if (!IsExtensionSupported(l_Available, l_WindowExtensions[i]))
+			if (!VulkanUtilities::IsExtensionSupported(l_Available, l_WindowExtensions[i]))
 			{
 				PT_CORE_CRITICAL("Required instance extension is not supported: {}", l_WindowExtensions[i]);
 
@@ -246,7 +213,7 @@ namespace Engine
 		}
 
 #ifdef PT_DEBUG
-		if (IsExtensionSupported(l_Available, VK_EXT_DEBUG_UTILS_EXTENSION_NAME))
+		if (VulkanUtilities::IsExtensionSupported(l_Available, VK_EXT_DEBUG_UTILS_EXTENSION_NAME))
 		{
 			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 		}
@@ -270,33 +237,12 @@ namespace Engine
 
 #ifdef PT_DEBUG
 		std::vector<VkLayerProperties> l_Available;
-		uint32_t l_AvailableCount = 0;
-		VkResult l_EnumerateResult = VK_INCOMPLETE;
-
-		// The set can change between the count and fill calls, VK_INCOMPLETE means retry
-		do
-		{
-			l_EnumerateResult = vkEnumerateInstanceLayerProperties(&l_AvailableCount, nullptr);
-
-			if (l_EnumerateResult != VK_SUCCESS)
-			{
-				break;
-			}
-
-			l_Available.resize(l_AvailableCount);
-			l_EnumerateResult = vkEnumerateInstanceLayerProperties(&l_AvailableCount, l_Available.data());
-		}
-		while (l_EnumerateResult == VK_INCOMPLETE);
-
-		if (l_EnumerateResult != VK_SUCCESS)
+		if (VulkanUtilities::Enumerate(l_Available, [](uint32_t* count, VkLayerProperties* data) { return vkEnumerateInstanceLayerProperties(count, data); }) != VK_SUCCESS)
 		{
 			PT_CORE_WARN("Failed to enumerate instance layers, validation is disabled");
 
 			return;
 		}
-
-		// The fill call wrote back the count it actually delivered
-		l_Available.resize(l_AvailableCount);
 
 		if (!IsLayerSupported(l_Available, k_ValidationLayerName))
 		{

@@ -39,8 +39,8 @@ namespace Engine
 		void PickPhysicalDevice(const std::vector<VkPhysicalDevice>& devices);
 		void CreateLogicalDevice();
 
-		static bool IsDeviceSuitable(VkPhysicalDevice device, uint32_t& graphicsQueueFamilyIndex);
-		static uint64_t ScoreDevice(VkPhysicalDevice device);
+		static bool IsDeviceSuitable(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties, uint32_t& graphicsQueueFamilyIndex);
+		static uint64_t ScoreDevice(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties);
 
 	private:
 		VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;

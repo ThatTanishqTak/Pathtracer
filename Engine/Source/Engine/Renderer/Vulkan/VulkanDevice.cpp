@@ -2,8 +2,8 @@
 
 #include "Engine/Core/Log.hpp"
 #include "Engine/Renderer/Vulkan/VulkanInstance.hpp"
+#include "Engine/Renderer/Vulkan/VulkanUtilities.hpp"
 
-#include <cstring>
 #include <iterator>
 
 namespace Engine
@@ -12,49 +12,15 @@ namespace Engine
 	{
 		constexpr const char* k_DeviceExtensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
-		bool IsExtensionSupported(const std::vector<VkExtensionProperties>& available, const char* name)
-		{
-			for (const VkExtensionProperties& l_Extension : available)
-			{
-				if (std::strcmp(l_Extension.extensionName, name) == 0)
-				{
-					return true;
-				}
-			}
-
-			return false;
-		}
-
 		bool IsDeviceExtensionSupported(VkPhysicalDevice device, const char* name)
 		{
 			std::vector<VkExtensionProperties> l_Available;
-			uint32_t l_AvailableCount = 0;
-			VkResult l_EnumerateResult = VK_INCOMPLETE;
-
-			// The set can change between the count and fill calls, VK_INCOMPLETE means retry
-			do
-			{
-				l_EnumerateResult = vkEnumerateDeviceExtensionProperties(device, nullptr, &l_AvailableCount, nullptr);
-
-				if (l_EnumerateResult != VK_SUCCESS)
-				{
-					break;
-				}
-
-				l_Available.resize(l_AvailableCount);
-				l_EnumerateResult = vkEnumerateDeviceExtensionProperties(device, nullptr, &l_AvailableCount, l_Available.data());
-			}
-			while (l_EnumerateResult == VK_INCOMPLETE);
-
-			if (l_EnumerateResult != VK_SUCCESS)
+			if (VulkanUtilities::Enumerate(l_Available, [device](uint32_t* count, VkExtensionProperties* data) { return vkEnumerateDeviceExtensionProperties(device, nullptr, count, data); }) != VK_SUCCESS)
 			{
 				return false;
 			}
 
-			// The fill call wrote back the count it actually delivered
-			l_Available.resize(l_AvailableCount);
-
-			return IsExtensionSupported(l_Available, name);
+			return VulkanUtilities::IsExtensionSupported(l_Available, name);
 		}
 
 		bool FindGraphicsQueueFamily(VkPhysicalDevice device, uint32_t& index)
@@ -175,14 +141,14 @@ namespace Engine
 
 	void VulkanDevice::Shutdown()
 	{
-		if (m_PhysicalDevice == VK_NULL_HANDLE)
+		if (m_Device == VK_NULL_HANDLE && m_PhysicalDevice == VK_NULL_HANDLE)
 		{
 			return;
 		}
 
 		PT_CORE_INFO("------- SHUTTING DOWN VULKAN DEVICE -------");
 
-		if (m_Device == VK_NULL_HANDLE && m_PhysicalDevice == VK_NULL_HANDLE)
+		if (m_Device != VK_NULL_HANDLE)
 		{
 			PT_CORE_TRACE("Destroying Logical Device");
 
@@ -211,34 +177,13 @@ namespace Engine
 
 		devices.clear();
 
-		uint32_t l_DeviceCount = 0;
-		VkResult l_EnumerateResult = VK_INCOMPLETE;
-
-		// The set can change between the count and fill calls, VK_INCOMPLETE means retry
-		do
-		{
-			l_EnumerateResult = vkEnumeratePhysicalDevices(instance.GetHandle(), &l_DeviceCount, nullptr);
-			if (l_EnumerateResult != VK_SUCCESS)
-			{
-				break;
-			}
-
-			devices.resize(l_DeviceCount);
-			l_EnumerateResult = vkEnumeratePhysicalDevices(instance.GetHandle(), &l_DeviceCount, devices.data());
-		}
-		while (l_EnumerateResult == VK_INCOMPLETE);
-
-		if (l_EnumerateResult != VK_SUCCESS)
+		VkInstance l_Instance = instance.GetHandle();
+		if (VulkanUtilities::Enumerate(devices, [l_Instance](uint32_t* count, VkPhysicalDevice* data) { return vkEnumeratePhysicalDevices(l_Instance, count, data); }) != VK_SUCCESS)
 		{
 			PT_CORE_CRITICAL("Failed to enumerate physical devices");
 
-			devices.clear();
-
 			return;
 		}
-
-		// The fill call wrote back the count it actually delivered
-		devices.resize(l_DeviceCount);
 
 		if (devices.empty())
 		{
@@ -257,6 +202,7 @@ namespace Engine
 		VkPhysicalDevice l_BestDevice = VK_NULL_HANDLE;
 		uint32_t l_BestGraphicsQueueFamilyIndex = UINT32_MAX;
 		uint64_t l_BestScore = 0;
+		VkPhysicalDeviceProperties l_BestProperties{};
 
 		for (VkPhysicalDevice l_Device : devices)
 		{
@@ -266,17 +212,18 @@ namespace Engine
 			PT_CORE_TRACE("-------{}", l_Properties.deviceName);
 
 			uint32_t l_GraphicsQueueFamilyIndex = UINT32_MAX;
-			if (!IsDeviceSuitable(l_Device, l_GraphicsQueueFamilyIndex))
+			if (!IsDeviceSuitable(l_Device, l_Properties, l_GraphicsQueueFamilyIndex))
 			{
 				continue;
 			}
 
-			const uint64_t l_Score = ScoreDevice(l_Device);
+			const uint64_t l_Score = ScoreDevice(l_Device, l_Properties);
 			if (l_Score > l_BestScore)
 			{
 				l_BestDevice = l_Device;
 				l_BestGraphicsQueueFamilyIndex = l_GraphicsQueueFamilyIndex;
 				l_BestScore = l_Score;
+				l_BestProperties = l_Properties;
 			}
 		}
 
@@ -290,10 +237,7 @@ namespace Engine
 		m_PhysicalDevice = l_BestDevice;
 		m_GraphicsQueueFamilyIndex = l_BestGraphicsQueueFamilyIndex;
 
-		VkPhysicalDeviceProperties l_Properties{};
-		vkGetPhysicalDeviceProperties(m_PhysicalDevice, &l_Properties);
-
-		PT_CORE_INFO("Selected GPU: {} ({})", l_Properties.deviceName, DeviceTypeToString(l_Properties.deviceType));
+		PT_CORE_INFO("Selected GPU: {} ({})", l_BestProperties.deviceName, DeviceTypeToString(l_BestProperties.deviceType));
 		PT_CORE_TRACE("Graphics Queue Family Index: {}", m_GraphicsQueueFamilyIndex);
 	}
 
@@ -421,12 +365,9 @@ namespace Engine
 		PT_CORE_TRACE("Logical Device Created");
 	}
 
-	bool VulkanDevice::IsDeviceSuitable(VkPhysicalDevice device, uint32_t& graphicsQueueFamilyIndex)
+	bool VulkanDevice::IsDeviceSuitable(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties, uint32_t& graphicsQueueFamilyIndex)
 	{
-		VkPhysicalDeviceProperties l_Properties{};
-		vkGetPhysicalDeviceProperties(device, &l_Properties);
-
-		if (l_Properties.apiVersion < VK_API_VERSION_1_4 || !FindGraphicsQueueFamily(device, graphicsQueueFamilyIndex) || !IsDeviceExtensionSupported(device, VK_KHR_SWAPCHAIN_EXTENSION_NAME))
+		if (properties.apiVersion < VK_API_VERSION_1_4 || !FindGraphicsQueueFamily(device, graphicsQueueFamilyIndex) || !IsDeviceExtensionSupported(device, VK_KHR_SWAPCHAIN_EXTENSION_NAME))
 		{
 			return false;
 		}
@@ -434,13 +375,10 @@ namespace Engine
 		return true;
 	}
 
-	uint64_t VulkanDevice::ScoreDevice(VkPhysicalDevice device)
+	uint64_t VulkanDevice::ScoreDevice(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties)
 	{
-		VkPhysicalDeviceProperties l_Properties{};
-		vkGetPhysicalDeviceProperties(device, &l_Properties);
-
 		uint64_t l_Score = 0;
-		switch (l_Properties.deviceType)
+		switch (properties.deviceType)
 		{
 			case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
 			{
