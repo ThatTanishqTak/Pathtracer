@@ -31,7 +31,6 @@ namespace Engine
 		VkInstance GetHandle() const { return m_Instance; }
 
 	private:
-		void InitializeVolk();
 		void GetRequiredExtensions(std::vector<const char*>& extensions);
 		void GetRequiredLayers(std::vector<const char*>& layers);
 		void CreateInstance(const std::vector<const char*>& extensions, const std::vector<const char*>& layers);
@@ -43,7 +42,5 @@ namespace Engine
 	private:
 		VkInstance m_Instance = VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
-
-		bool m_VolkInitialized = false;
 	};
 }

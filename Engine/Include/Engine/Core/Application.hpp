@@ -36,8 +36,8 @@ namespace Engine
 
 		bool IsInitialized() const;
 
-		unsigned int GetWindowWidth() const;
-		unsigned int GetWindowHeight() const;
+		int GetWindowWidth() const;
+		int GetWindowHeight() const;
 
 		const ApplicationSpecification& GetSpecification() const;
 
@@ -48,7 +48,6 @@ namespace Engine
 		std::unique_ptr<Renderer> m_Renderer;
 
 		bool m_Initialized = false;
-		bool m_Running = false;
 	};
 
 	// Implemented by the client

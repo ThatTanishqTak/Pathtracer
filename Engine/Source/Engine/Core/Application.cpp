@@ -96,7 +96,6 @@ namespace Engine
 		Platform::Shutdown();
 
 		m_Initialized = false;
-		m_Running = false;
 
 		PT_CORE_INFO("------- APPLICATION SHUTDOWN COMPLETE -------");
 	}
@@ -112,24 +111,18 @@ namespace Engine
 
 		PT_CORE_INFO("------- ENTERING MAIN LOOP -------");
 
-		m_Running = true;
-
-		while (m_Running && !m_Window->ShouldClose())
+		while (!m_Window->ShouldClose())
 		{
 			m_Window->PollEvents();
 
 			m_Renderer->Render();
 		}
 
-		m_Running = false;
-
 		PT_CORE_INFO("------- EXITING MAIN LOOP -------");
 	}
 
 	void Application::Close()
 	{
-		m_Running = false;
-
 		if (m_Window)
 		{
 			m_Window->RequestClose();
@@ -141,24 +134,24 @@ namespace Engine
 		return m_Initialized;
 	}
 
-	unsigned int Application::GetWindowWidth() const
+	int Application::GetWindowWidth() const
 	{
 		if (!m_Window)
 		{
 			return 0;
 		}
 
-		return static_cast<unsigned int>(m_Window->GetWidth());
+		return m_Window->GetWidth();
 	}
 
-	unsigned int Application::GetWindowHeight() const
+	int Application::GetWindowHeight() const
 	{
 		if (!m_Window)
 		{
 			return 0;
 		}
 
-		return static_cast<unsigned int>(m_Window->GetHeight());
+		return m_Window->GetHeight();
 	}
 
 	const ApplicationSpecification& Application::GetSpecification() const

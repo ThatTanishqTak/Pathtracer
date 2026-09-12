@@ -12,6 +12,7 @@
 namespace Engine
 {
 	class VulkanInstance;
+	class VulkanSurface;
 
 	class VulkanDevice
 	{
@@ -24,7 +25,7 @@ namespace Engine
 		VulkanDevice(VulkanDevice&&) = delete;
 		VulkanDevice& operator=(VulkanDevice&&) = delete;
 
-		void Initialize(const VulkanInstance& instance);
+		void Initialize(const VulkanInstance& instance, const VulkanSurface& surface);
 		void Shutdown();
 
 		bool IsInitialized() const { return m_Device != VK_NULL_HANDLE; }
@@ -36,10 +37,10 @@ namespace Engine
 
 	private:
 		void EnumeratePhysicalDevices(const VulkanInstance& instance, std::vector<VkPhysicalDevice>& devices);
-		void PickPhysicalDevice(const std::vector<VkPhysicalDevice>& devices);
+		void PickPhysicalDevice(const std::vector<VkPhysicalDevice>& devices, VkSurfaceKHR surface);
 		void CreateLogicalDevice();
 
-		static bool IsDeviceSuitable(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties, uint32_t& graphicsQueueFamilyIndex);
+		static bool IsDeviceSuitable(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties, VkSurfaceKHR surface, uint32_t& graphicsQueueFamilyIndex);
 		static uint64_t ScoreDevice(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties);
 
 	private:

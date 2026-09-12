@@ -10,8 +10,8 @@ namespace Engine
 {
 	class Window;
 	class VulkanInstance;
-	class VulkanDevice;
 	class VulkanSurface;
+	class VulkanDevice;
 
 	class VulkanRenderer
 	{
@@ -25,10 +25,16 @@ namespace Engine
 		bool IsInitialized() const;
 
 	private:
+		void InitializeVolk();
+		void ShutdownVolk();
+
+	private:
 		std::unique_ptr<VulkanInstance> m_VulkanInstance;
 		std::unique_ptr<VulkanDevice> m_VulkanDevice;
 		std::unique_ptr<VulkanSurface> m_VulkanSurface;
 
 		const Window* m_Window = nullptr;
+
+		bool m_VolkInitialized = false;
 	};
 }

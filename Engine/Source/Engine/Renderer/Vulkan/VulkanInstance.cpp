@@ -63,14 +63,14 @@ namespace Engine
 			return;
 		}
 
-		PT_CORE_INFO("------- INITIALIZING VULKAN INSTANCE -------");
-
-		InitializeVolk();
-
-		if (!m_VolkInitialized)
+		if (volkGetInstanceVersion() == 0)
 		{
+			PT_CORE_CRITICAL("Volk must be initialized before creating the Vulkan instance");
+
 			return;
 		}
+
+		PT_CORE_INFO("------- INITIALIZING VULKAN INSTANCE -------");
 
 		std::vector<const char*> l_Extensions;
 		GetRequiredExtensions(l_Extensions);
@@ -104,7 +104,7 @@ namespace Engine
 
 	void VulkanInstance::Shutdown()
 	{
-		if (!m_VolkInitialized && m_Instance == VK_NULL_HANDLE)
+		if (m_Instance == VK_NULL_HANDLE)
 		{
 			return;
 		}
@@ -131,47 +131,7 @@ namespace Engine
 			PT_CORE_TRACE("Vulkan Instance Destroyed");
 		}
 
-		if (m_VolkInitialized)
-		{
-			PT_CORE_TRACE("Deinitializing Volk");
-
-			volkFinalize();
-			m_VolkInitialized = false;
-
-			PT_CORE_TRACE("Volk Deinitialized");
-		}
-
 		PT_CORE_INFO("------- VULKAN INSTANCE SHUTDOWN COMPLETE -------");
-	}
-
-	void VulkanInstance::InitializeVolk()
-	{
-		PT_CORE_TRACE("Initializing Volk");
-
-		if (volkInitialize() != VK_SUCCESS)
-		{
-			PT_CORE_CRITICAL("Failed to initialize volk, no Vulkan loader was found");
-
-			return;
-		}
-
-		m_VolkInitialized = true;
-
-		const uint32_t l_LoaderVersion = volkGetInstanceVersion();
-
-		PT_CORE_TRACE("Vulkan loader version: {}.{}.{}", VK_API_VERSION_MAJOR(l_LoaderVersion), VK_API_VERSION_MINOR(l_LoaderVersion), VK_API_VERSION_PATCH(l_LoaderVersion));
-
-		if (l_LoaderVersion < VK_API_VERSION_1_4)
-		{
-			PT_CORE_CRITICAL("Vulkan 1.4 is required, the installed loader is too old");
-
-			volkFinalize();
-			m_VolkInitialized = false;
-
-			return;
-		}
-
-		PT_CORE_TRACE("Volk Initialized");
 	}
 
 	void VulkanInstance::GetRequiredExtensions(std::vector<const char*>& extensions)

@@ -4,8 +4,6 @@
 
 #include "Engine/Core/Log.hpp"
 
-#include <memory>
-
 namespace Engine
 {
 	Renderer::Renderer() = default;

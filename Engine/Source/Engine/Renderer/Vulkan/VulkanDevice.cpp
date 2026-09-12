@@ -1,8 +1,9 @@
 #include "Engine/Renderer/Vulkan/VulkanDevice.hpp"
 
-#include "Engine/Core/Log.hpp"
 #include "Engine/Renderer/Vulkan/VulkanInstance.hpp"
+#include "Engine/Renderer/Vulkan/VulkanSurface.hpp"
 #include "Engine/Renderer/Vulkan/VulkanUtilities.hpp"
+#include "Engine/Core/Log.hpp"
 
 #include <iterator>
 
@@ -23,7 +24,7 @@ namespace Engine
 			return VulkanUtilities::IsExtensionSupported(l_Available, name);
 		}
 
-		bool FindGraphicsQueueFamily(VkPhysicalDevice device, uint32_t& index)
+		bool FindGraphicsQueueFamily(VkPhysicalDevice device, VkSurfaceKHR surface, uint32_t& index)
 		{
 			uint32_t l_QueueFamilyCount = 0;
 			vkGetPhysicalDeviceQueueFamilyProperties(device, &l_QueueFamilyCount, nullptr);
@@ -33,15 +34,40 @@ namespace Engine
 
 			for (uint32_t i = 0; i < l_QueueFamilyCount; i++)
 			{
-				if (l_QueueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+				if (!(l_QueueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
 				{
-					index = i;
-
-					return true;
+					continue;
 				}
+
+				VkBool32 l_PresentSupported = VK_FALSE;
+				if (vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &l_PresentSupported) != VK_SUCCESS || l_PresentSupported != VK_TRUE)
+				{
+					continue;
+				}
+
+				index = i;
+
+				return true;
 			}
 
 			return false;
+		}
+
+		bool HasSurfaceFormatsAndPresentModes(VkPhysicalDevice device, VkSurfaceKHR surface)
+		{
+			uint32_t l_FormatCount = 0;
+			if (vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &l_FormatCount, nullptr) != VK_SUCCESS || l_FormatCount == 0)
+			{
+				return false;
+			}
+
+			uint32_t l_PresentModeCount = 0;
+			if (vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &l_PresentModeCount, nullptr) != VK_SUCCESS || l_PresentModeCount == 0)
+			{
+				return false;
+			}
+
+			return true;
 		}
 
 		uint64_t GetDeviceLocalMemorySize(VkPhysicalDevice device)
@@ -92,7 +118,7 @@ namespace Engine
 	VulkanDevice::VulkanDevice() = default;
 	VulkanDevice::~VulkanDevice() = default;
 
-	void VulkanDevice::Initialize(const VulkanInstance& instance)
+	void VulkanDevice::Initialize(const VulkanInstance& instance, const VulkanSurface& surface)
 	{
 		if (m_Device != VK_NULL_HANDLE)
 		{
@@ -108,11 +134,17 @@ namespace Engine
 			return;
 		}
 
+		if (!surface.IsInitialized())
+		{
+			PT_CORE_CRITICAL("A valid surface is required to select a physical device");
+
+			return;
+		}
+
 		PT_CORE_INFO("------- INITIALIZING VULKAN DEVICE -------");
 
 		std::vector<VkPhysicalDevice> l_Devices;
 		EnumeratePhysicalDevices(instance, l_Devices);
-
 		if (l_Devices.empty())
 		{
 			Shutdown();
@@ -120,7 +152,7 @@ namespace Engine
 			return;
 		}
 
-		PickPhysicalDevice(l_Devices);
+		PickPhysicalDevice(l_Devices, surface.GetHandle());
 		if (m_PhysicalDevice == VK_NULL_HANDLE)
 		{
 			Shutdown();
@@ -195,7 +227,7 @@ namespace Engine
 		PT_CORE_TRACE("Found {} GPU(s)", devices.size());
 	}
 
-	void VulkanDevice::PickPhysicalDevice(const std::vector<VkPhysicalDevice>& devices)
+	void VulkanDevice::PickPhysicalDevice(const std::vector<VkPhysicalDevice>& devices, VkSurfaceKHR surface)
 	{
 		PT_CORE_TRACE("Selecting Suitable GPU");
 
@@ -212,7 +244,7 @@ namespace Engine
 			PT_CORE_TRACE("-------{}", l_Properties.deviceName);
 
 			uint32_t l_GraphicsQueueFamilyIndex = UINT32_MAX;
-			if (!IsDeviceSuitable(l_Device, l_Properties, l_GraphicsQueueFamilyIndex))
+			if (!IsDeviceSuitable(l_Device, l_Properties, surface, l_GraphicsQueueFamilyIndex))
 			{
 				continue;
 			}
@@ -365,9 +397,9 @@ namespace Engine
 		PT_CORE_TRACE("Logical Device Created");
 	}
 
-	bool VulkanDevice::IsDeviceSuitable(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties, uint32_t& graphicsQueueFamilyIndex)
+	bool VulkanDevice::IsDeviceSuitable(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties, VkSurfaceKHR surface, uint32_t& graphicsQueueFamilyIndex)
 	{
-		if (properties.apiVersion < VK_API_VERSION_1_4 || !FindGraphicsQueueFamily(device, graphicsQueueFamilyIndex) || !IsDeviceExtensionSupported(device, VK_KHR_SWAPCHAIN_EXTENSION_NAME))
+		if (properties.apiVersion < VK_API_VERSION_1_4 || !FindGraphicsQueueFamily(device, surface, graphicsQueueFamilyIndex) || !IsDeviceExtensionSupported(device, VK_KHR_SWAPCHAIN_EXTENSION_NAME) || !HasSurfaceFormatsAndPresentModes(device, surface))
 		{
 			return false;
 		}

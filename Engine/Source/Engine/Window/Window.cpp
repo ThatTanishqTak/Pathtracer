@@ -30,6 +30,7 @@ namespace Engine
 
 		m_Specification = specification;
 		m_ShouldClose = false;
+		m_FramebufferResized = false;
 
 		if (m_Specification.Width <= 0 || m_Specification.Height <= 0)
 		{
@@ -53,11 +54,13 @@ namespace Engine
 			return;
 		}
 
-		// SDL may grant a different size than requested
-		SDL_GetWindowSize(m_NativeWindowHandle, &m_Specification.Width, &m_Specification.Height);
+		// SDL may grant a different size than requested, the specification keeps the requested values
+		int l_Width = 0;
+		int l_Height = 0;
+		SDL_GetWindowSize(m_NativeWindowHandle, &l_Width, &l_Height);
 
 		PT_CORE_TRACE("Window Title: {}", m_Specification.Title);
-		PT_CORE_TRACE("Window Resolution: {}x{}", m_Specification.Width, m_Specification.Height);
+		PT_CORE_TRACE("Window Resolution: {}x{}", l_Width, l_Height);
 
 		PT_CORE_INFO("------- WINDOW INITIALIZED -------");
 	}
@@ -75,6 +78,7 @@ namespace Engine
 
 		m_NativeWindowHandle = nullptr;
 		m_ShouldClose = false;
+		m_FramebufferResized = false;
 
 		PT_CORE_INFO("------- WINDOW SHUTDOWN COMPLETE -------");
 	}
@@ -96,12 +100,11 @@ namespace Engine
 				}
 				break;
 			}
-			case SDL_EVENT_WINDOW_RESIZED:
+			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
 			{
 				if (m_NativeWindowHandle && event.window.windowID == SDL_GetWindowID(m_NativeWindowHandle))
 				{
-					m_Specification.Width = event.window.data1;
-					m_Specification.Height = event.window.data2;
+					m_FramebufferResized = true;
 				}
 				break;
 			}
@@ -178,5 +181,13 @@ namespace Engine
 		{
 			SDL_GetWindowSizeInPixels(m_NativeWindowHandle, &width, &height);
 		}
+	}
+
+	bool Window::ConsumeFramebufferResized()
+	{
+		const bool l_Resized = m_FramebufferResized;
+		m_FramebufferResized = false;
+
+		return l_Resized;
 	}
 }

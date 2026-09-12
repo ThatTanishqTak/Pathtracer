@@ -32,7 +32,6 @@ namespace Engine
 		Window(Window&&) = delete;
 		Window& operator=(Window&&) = delete;
 
-		// Requires an initialized Platform
 		void Initialize(const WindowSpecification& specification = {});
 		void Shutdown();
 
@@ -43,13 +42,12 @@ namespace Engine
 		SDL_Window* GetNativeWindow() const { return m_NativeWindowHandle; }
 		bool IsValid() const { return m_NativeWindowHandle != nullptr; }
 
-		// Screen coordinates
 		int GetWidth() const;
 		int GetHeight() const;
 
-		// Pixels, required for the swapchain extent
-		void GetFramebufferSize(int& Width, int& Height) const;
-
+		void GetFramebufferSize(int& width, int& height) const;
+		bool ConsumeFramebufferResized();
+		
 		const WindowSpecification& GetSpecification() const { return m_Specification; }
 
 	private:
@@ -57,8 +55,8 @@ namespace Engine
 
 		SDL_Window* m_NativeWindowHandle = nullptr;
 
-		// SDL delivers close requests as events, so the window tracks the flag itself
 		bool m_ShouldClose = false;
+		bool m_FramebufferResized = false;
 
 		WindowSpecification m_Specification;
 	};

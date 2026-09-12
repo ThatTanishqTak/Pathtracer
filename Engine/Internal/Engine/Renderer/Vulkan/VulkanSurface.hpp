@@ -8,6 +8,9 @@
 
 namespace Engine
 {
+	class VulkanInstance;
+	class Window;
+
 	class VulkanSurface
 	{
 	public:
@@ -19,15 +22,18 @@ namespace Engine
 		VulkanSurface(VulkanSurface&&) = delete;
 		VulkanSurface& operator=(VulkanSurface&&) = delete;
 
-		void Initialize();
+		void Initialize(const VulkanInstance& instance, const Window& window);
 		void Shutdown();
+
+		bool IsInitialized() const { return m_Surface != VK_NULL_HANDLE; }
 
 		VkSurfaceKHR GetHandle() const { return m_Surface; }
 
 	private:
-		void CreateSurface();
+		void CreateSurface(const Window& window);
 
 	private:
 		VkSurfaceKHR m_Surface = VK_NULL_HANDLE;
+		VkInstance m_Instance = VK_NULL_HANDLE;
 	};
 }

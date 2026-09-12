@@ -112,16 +112,6 @@ namespace Engine
 
 	void Log::Dispatch(LogCategory category, LogLevel level, std::string message)
 	{
-		if (!s_Initialized)
-		{
-			return;
-		}
-
-		if (level < s_Level)
-		{
-			return;
-		}
-
 		const std::shared_ptr<spdlog::logger>& l_Logger = (category == LogCategory::Core) ? s_CoreLogger : s_ClientLogger;
 
 		l_Logger->log(ToBackendLevel(level), message);
