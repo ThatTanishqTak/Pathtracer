@@ -2,6 +2,7 @@
 
 #include "Engine/Renderer/Vulkan/VulkanDevice.hpp"
 #include "Engine/Renderer/Vulkan/VulkanSwapchain.hpp"
+#include "Engine/Renderer/Vulkan/VulkanUtilities.hpp"
 #include "Engine/Core/Log.hpp"
 
 namespace Engine
@@ -104,7 +105,10 @@ namespace Engine
 			return;
 		}
 
-		if (m_Swapchain->GetGeneration() == m_SwapchainGeneration)
+		// Rehook on a swapchain generation change, or when an earlier recreate or recovery failed and left the sets empty or mismatched
+		const bool l_GenerationChanged = m_Swapchain->GetGeneration() != m_SwapchainGeneration;
+		const bool l_SetsIncomplete = m_ImageAvailableSemaphores.empty() || m_RenderFinishedSemaphores.size() != m_Swapchain->GetImageCount();
+		if (!l_GenerationChanged && !l_SetsIncomplete)
 		{
 			return;
 		}
@@ -219,7 +223,7 @@ namespace Engine
 		const VkResult l_Result = vkQueueSubmit2(queue, 1, &l_SubmitInfo, VK_NULL_HANDLE);
 		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_ERROR("Failed vkQueueSubmit2: {}", static_cast<int>(l_Result));
+			PT_CORE_ERROR("Failed vkQueueSubmit2: {}", VulkanUtilities::ResultToString(l_Result));
 
 			return false;
 		}
@@ -258,7 +262,7 @@ namespace Engine
 		const VkResult l_Result = vkCreateSemaphore(m_Device->GetHandle(), &l_SemaphoreCreateInfo, nullptr, &m_ImageAvailableSemaphores[l_FrameIndex]);
 		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_ERROR("Failed to recreate image available semaphore: {}", static_cast<int>(l_Result));
+			PT_CORE_ERROR("Failed to recreate image available semaphore: {}", VulkanUtilities::ResultToString(l_Result));
 
 			DestroyFrameSemaphores();
 		}
@@ -304,7 +308,7 @@ namespace Engine
 		const VkResult l_Result = vkCreateSemaphore(m_Device->GetHandle(), &l_SemaphoreCreateInfo, nullptr, &m_TimelineSemaphore);
 		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_CRITICAL("Failed vkCreateSemaphore for the timeline semaphore: {}", static_cast<int>(l_Result));
+			PT_CORE_CRITICAL("Failed vkCreateSemaphore for the timeline semaphore: {}", VulkanUtilities::ResultToString(l_Result));
 
 			m_TimelineSemaphore = VK_NULL_HANDLE;
 
@@ -327,7 +331,7 @@ namespace Engine
 			const VkResult l_Result = vkCreateSemaphore(m_Device->GetHandle(), &l_SemaphoreCreateInfo, nullptr, &m_ImageAvailableSemaphores[i]);
 			if (l_Result != VK_SUCCESS)
 			{
-				PT_CORE_CRITICAL("Failed vkCreateSemaphore for image available semaphore {}: {}", i, static_cast<int>(l_Result));
+				PT_CORE_CRITICAL("Failed vkCreateSemaphore for image available semaphore {}: {}", i, VulkanUtilities::ResultToString(l_Result));
 
 				DestroyFrameSemaphores();
 
@@ -351,7 +355,7 @@ namespace Engine
 			const VkResult l_Result = vkCreateSemaphore(m_Device->GetHandle(), &l_SemaphoreCreateInfo, nullptr, &m_RenderFinishedSemaphores[i]);
 			if (l_Result != VK_SUCCESS)
 			{
-				PT_CORE_CRITICAL("Failed vkCreateSemaphore for render finished semaphore {}: {}", i, static_cast<int>(l_Result));
+				PT_CORE_CRITICAL("Failed vkCreateSemaphore for render finished semaphore {}: {}", i, VulkanUtilities::ResultToString(l_Result));
 
 				DestroyImageSemaphores();
 
@@ -426,7 +430,7 @@ namespace Engine
 		const VkResult l_Result = vkWaitSemaphores(m_Device->GetHandle(), &l_WaitInfo, UINT64_MAX);
 		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_ERROR("Failed vkWaitSemaphores for timeline value {}: {}", value, static_cast<int>(l_Result));
+			PT_CORE_ERROR("Failed vkWaitSemaphores for timeline value {}: {}", value, VulkanUtilities::ResultToString(l_Result));
 
 			return false;
 		}

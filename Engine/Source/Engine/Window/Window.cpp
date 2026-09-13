@@ -119,6 +119,28 @@ namespace Engine
 		}
 	}
 
+	void Window::WaitEvents()
+	{
+		SDL_Event l_Event;
+
+		if (SDL_WaitEvent(&l_Event))
+		{
+			HandleEvent(l_Event);
+		}
+
+		PollEvents();
+	}
+
+	bool Window::IsMinimized() const
+	{
+		if (!m_NativeWindowHandle)
+		{
+			return false;
+		}
+
+		return (SDL_GetWindowFlags(m_NativeWindowHandle) & SDL_WINDOW_MINIMIZED) != 0;
+	}
+
 	bool Window::ShouldClose() const
 	{
 		if (!m_NativeWindowHandle)

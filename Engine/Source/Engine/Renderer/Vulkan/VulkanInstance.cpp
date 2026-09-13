@@ -250,7 +250,7 @@ namespace Engine
 		const VkResult l_Result = vkCreateInstance(&l_InstanceCreateInfo, nullptr, &m_Instance);
 		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_CRITICAL("vkCreateInstance failed with result {}", static_cast<int>(l_Result));
+			PT_CORE_CRITICAL("vkCreateInstance failed with result {}", VulkanUtilities::ResultToString(l_Result));
 
 			m_Instance = VK_NULL_HANDLE;
 
@@ -284,7 +284,7 @@ namespace Engine
 		const VkResult l_Result = vkCreateDebugUtilsMessengerEXT(m_Instance, &l_DebugMessengerCreateInfo, nullptr, &m_DebugMessenger);
 		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_ERROR("vkCreateDebugUtilsMessengerEXT failed with result {}", static_cast<int>(l_Result));
+			PT_CORE_ERROR("vkCreateDebugUtilsMessengerEXT failed with result {}", VulkanUtilities::ResultToString(l_Result));
 
 			m_DebugMessenger = VK_NULL_HANDLE;
 

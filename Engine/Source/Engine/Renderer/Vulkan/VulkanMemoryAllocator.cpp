@@ -2,6 +2,7 @@
 
 #include "Engine/Renderer/Vulkan/VulkanInstance.hpp"
 #include "Engine/Renderer/Vulkan/VulkanDevice.hpp"
+#include "Engine/Renderer/Vulkan/VulkanUtilities.hpp"
 #include "Engine/Core/Log.hpp"
 
 namespace Engine
@@ -74,7 +75,7 @@ namespace Engine
 
 		VmaAllocatorCreateInfo l_AllocatorCreateInfo
 		{
-			.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE4_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT,
+			.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT,
 			.physicalDevice = device.GetPhysicalDevice(),
 			.device = device.GetHandle(),
 			.pVulkanFunctions = &l_Functions,
@@ -85,7 +86,7 @@ namespace Engine
 		const VkResult l_Result = vmaCreateAllocator(&l_AllocatorCreateInfo, &m_VulkanMemoryAllocator);
 		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_CRITICAL("Failed vmaCreateAllocator: {}", static_cast<int>(l_Result));
+			PT_CORE_CRITICAL("Failed vmaCreateAllocator: {}", VulkanUtilities::ResultToString(l_Result));
 
 			m_VulkanMemoryAllocator = VK_NULL_HANDLE;
 

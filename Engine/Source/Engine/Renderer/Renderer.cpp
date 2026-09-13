@@ -23,6 +23,13 @@ namespace Engine
 		m_VulkanRenderer = std::make_unique<VulkanRenderer>();
 		m_VulkanRenderer->Initialize(window);
 
+		if (!m_VulkanRenderer->IsInitialized())
+		{
+			PT_CORE_ERROR("------- RENDERER INITIALIZATION FAILED -------");
+
+			return;
+		}
+
 		PT_CORE_INFO("------- RENDERER INITIALIZED -------");
 	}
 
@@ -44,9 +51,14 @@ namespace Engine
 		PT_CORE_INFO("------- RENDERER SHUTDOWN COMPLETE -------");
 	}
 
-	void Renderer::Render()
+	bool Renderer::Render()
 	{
+		if (!m_VulkanRenderer)
+		{
+			return false;
+		}
 
+		return m_VulkanRenderer->Render();
 	}
 
 	void Renderer::OnFramebufferResized()

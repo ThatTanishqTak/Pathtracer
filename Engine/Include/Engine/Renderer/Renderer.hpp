@@ -17,8 +17,7 @@ namespace Engine
 		void Shutdown();
 
 		bool IsInitialized() const;
-
-		void Render();
+		bool Render();
 
 		void OnFramebufferResized();
 

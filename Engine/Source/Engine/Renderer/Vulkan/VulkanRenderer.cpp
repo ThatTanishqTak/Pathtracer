@@ -6,6 +6,7 @@
 #include "Engine/Renderer/Vulkan/VulkanMemoryAllocator.hpp"
 #include "Engine/Renderer/Vulkan/VulkanSwapchain.hpp"
 #include "Engine/Renderer/Vulkan/VulkanSynchronization.hpp"
+#include "Engine/Renderer/Vulkan/VulkanCommandPool.hpp"
 #include "Engine/Core/Log.hpp"
 
 #include <volk.h>
@@ -14,6 +15,12 @@
 
 namespace Engine
 {
+	namespace
+	{
+		// Placeholder until the pathtracer output is blitted into the swapchain
+		constexpr VkClearColorValue k_ClearColor{ .float32 = { 0.05f, 0.05f, 0.05f, 1.0f } };
+	}
+
 	VulkanRenderer::VulkanRenderer() = default;
 	VulkanRenderer::~VulkanRenderer() = default;
 
@@ -81,12 +88,143 @@ namespace Engine
 			return;
 		}
 
+		m_VulkanCommandPool = std::make_unique<VulkanCommandPool>();
+		m_VulkanCommandPool->Initialize(*m_VulkanDevice, static_cast<uint32_t>(VulkanSynchronization::k_MaxFramesInFlight));
+		if (!m_VulkanCommandPool->IsInitialized())
+		{
+			return;
+		}
+
 		PT_CORE_INFO("------- VULKAN RENDERER INITIALIZED -------");
 	}
 
 	bool VulkanRenderer::IsInitialized() const
 	{
-		return m_VulkanInstance && m_VulkanInstance->IsInitialized() && m_VulkanSurface && m_VulkanSurface->IsInitialized() && m_VulkanDevice && m_VulkanDevice->IsInitialized() && m_VulkanMemoryAllocator && m_VulkanMemoryAllocator->IsInitialized() && m_VulkanSwapchain && m_VulkanSwapchain->IsInitialized() && m_VulkanSynchronization && m_VulkanSynchronization->IsInitialized();
+		const bool l_CoreReady = m_VulkanInstance && m_VulkanInstance->IsInitialized()
+			&& m_VulkanSurface && m_VulkanSurface->IsInitialized()
+			&& m_VulkanDevice && m_VulkanDevice->IsInitialized()
+			&& m_VulkanMemoryAllocator && m_VulkanMemoryAllocator->IsInitialized();
+
+		const bool l_FrameReady = m_VulkanSwapchain && m_VulkanSwapchain->IsInitialized()
+			&& m_VulkanSynchronization && m_VulkanSynchronization->IsInitialized()
+			&& m_VulkanCommandPool && m_VulkanCommandPool->IsInitialized();
+
+		return l_CoreReady && l_FrameReady;
+	}
+
+	bool VulkanRenderer::Render()
+	{
+		if (!IsInitialized())
+		{
+			return false;
+		}
+
+		// Blocks until the frame that last used this slot has finished on the GPU, and rehooks semaphores after a swapchain recreate
+		if (!m_VulkanSynchronization->WaitForFrame())
+		{
+			return false;
+		}
+
+		uint32_t l_ImageIndex = 0;
+		if (!m_VulkanSwapchain->AcquireNextImage(m_VulkanSynchronization->GetImageAvailableSemaphore(), l_ImageIndex))
+		{
+			// Swapchain was recreated or is not renderable, the next frame will rehook and retry
+			return false;
+		}
+
+		const uint32_t l_FrameIndex = m_VulkanSynchronization->GetFrameIndex();
+		VkCommandBuffer l_CommandBuffer = m_VulkanCommandPool->GetCommandBuffer(l_FrameIndex);
+
+		if (!m_VulkanCommandPool->Begin(l_FrameIndex))
+		{
+			m_VulkanSynchronization->RecoverAbandonedAcquire();
+
+			return false;
+		}
+
+		RecordFrame(l_CommandBuffer, l_ImageIndex);
+
+		if (!m_VulkanCommandPool->End(l_FrameIndex))
+		{
+			m_VulkanSynchronization->RecoverAbandonedAcquire();
+
+			return false;
+		}
+
+		if (!m_VulkanSynchronization->Submit(m_VulkanDevice->GetGraphicsQueue(), l_CommandBuffer, l_ImageIndex))
+		{
+			m_VulkanSynchronization->RecoverAbandonedAcquire();
+
+			return false;
+		}
+
+		return m_VulkanSwapchain->Present(m_VulkanDevice->GetGraphicsQueue(), m_VulkanSynchronization->GetRenderFinishedSemaphore(l_ImageIndex), l_ImageIndex);
+	}
+
+	void VulkanRenderer::RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex)
+	{
+		VkImage l_Image = m_VulkanSwapchain->GetImage(imageIndex);
+
+		const VkImageSubresourceRange l_ColorRange
+		{
+			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = 0,
+			.layerCount = 1,
+		};
+
+		// The acquire semaphore is waited at the transfer stage, so the transition must start there to be ordered after it
+		VkImageMemoryBarrier2 l_ToTransferBarrier
+		{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+			.srcAccessMask = VK_ACCESS_2_NONE,
+			.dstStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT,
+			.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = l_Image,
+			.subresourceRange = l_ColorRange,
+		};
+
+		VkDependencyInfo l_ToTransferDependency
+		{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &l_ToTransferBarrier,
+		};
+
+		vkCmdPipelineBarrier2(commandBuffer, &l_ToTransferDependency);
+
+		vkCmdClearColorImage(commandBuffer, l_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &k_ClearColor, 1, &l_ColorRange);
+
+		// Presentation engine reads are made visible through the render finished semaphore, the barrier only changes layout
+		VkImageMemoryBarrier2 l_ToPresentBarrier
+		{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT,
+			.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+			.dstAccessMask = VK_ACCESS_2_NONE,
+			.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = l_Image,
+			.subresourceRange = l_ColorRange,
+		};
+
+		VkDependencyInfo l_ToPresentDependency
+		{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &l_ToPresentBarrier,
+		};
+
+		vkCmdPipelineBarrier2(commandBuffer, &l_ToPresentDependency);
 	}
 
 	void VulkanRenderer::OnFramebufferResized()
@@ -100,6 +238,17 @@ namespace Engine
 	void VulkanRenderer::Shutdown()
 	{
 		PT_CORE_INFO("------- SHUTTING DOWN VULKAN RENDERER -------");
+
+		if (m_VulkanSynchronization)
+		{
+			m_VulkanSynchronization->WaitForAllFrames();
+		}
+
+		if (m_VulkanCommandPool)
+		{
+			m_VulkanCommandPool->Shutdown();
+			m_VulkanCommandPool.reset();
+		}
 
 		if (m_VulkanSynchronization)
 		{

@@ -36,7 +36,9 @@ namespace Engine
 		void Shutdown();
 
 		void PollEvents();
+		void WaitEvents();
 		bool ShouldClose() const;
+		bool IsMinimized() const;
 		void RequestClose();
 
 		SDL_Window* GetNativeWindow() const { return m_NativeWindowHandle; }

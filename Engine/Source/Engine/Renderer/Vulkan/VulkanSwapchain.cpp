@@ -335,7 +335,7 @@ namespace Engine
 
 		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_ERROR("Failed vkAcquireNextImageKHR: {}", static_cast<int>(l_Result));
+			PT_CORE_ERROR("Failed vkAcquireNextImageKHR: {}", VulkanUtilities::ResultToString(l_Result));
 
 			return false;
 		}
@@ -378,7 +378,7 @@ namespace Engine
 
 		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_ERROR("Failed vkQueuePresentKHR: {}", static_cast<int>(l_Result));
+			PT_CORE_ERROR("Failed vkQueuePresentKHR: {}", VulkanUtilities::ResultToString(l_Result));
 
 			return false;
 		}
@@ -469,7 +469,7 @@ namespace Engine
 		const VkResult l_Result = vkCreateSwapchainKHR(m_Device->GetHandle(), &l_SwapchainCreateInfo, nullptr, &l_Swapchain);
 		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_CRITICAL("Failed vkCreateSwapchainKHR: {}", static_cast<int>(l_Result));
+			PT_CORE_CRITICAL("Failed vkCreateSwapchainKHR: {}", VulkanUtilities::ResultToString(l_Result));
 
 			DestroySwapchain();
 			m_Images.clear();
@@ -537,7 +537,7 @@ namespace Engine
 			const VkResult l_Result = vkCreateImageView(m_Device->GetHandle(), &l_ImageViewCreateInfo, nullptr, &m_ImageViews[i]);
 			if (l_Result != VK_SUCCESS)
 			{
-				PT_CORE_CRITICAL("Failed vkCreateImageView for swapchain image {}: {}", i, static_cast<int>(l_Result));
+				PT_CORE_CRITICAL("Failed vkCreateImageView for swapchain image {}: {}", i, VulkanUtilities::ResultToString(l_Result));
 
 				DestroyImageViews();
 

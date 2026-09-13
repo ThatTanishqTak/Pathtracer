@@ -4,6 +4,9 @@
 #error "Engine internal header, not part of the public API"
 #endif
 
+#include <volk.h>
+
+#include <cstdint>
 #include <memory>
 
 namespace Engine
@@ -15,6 +18,7 @@ namespace Engine
 	class VulkanMemoryAllocator;
 	class VulkanSwapchain;
 	class VulkanSynchronization;
+	class VulkanCommandPool;
 
 	class VulkanRenderer
 	{
@@ -26,12 +30,15 @@ namespace Engine
 		void Shutdown();
 
 		bool IsInitialized() const;
+		bool Render();
 
 		void OnFramebufferResized();
 
 	private:
 		void InitializeVolk();
 		void ShutdownVolk();
+
+		void RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 
 	private:
 		std::unique_ptr<VulkanInstance> m_VulkanInstance;
@@ -40,6 +47,7 @@ namespace Engine
 		std::unique_ptr<VulkanMemoryAllocator> m_VulkanMemoryAllocator;
 		std::unique_ptr<VulkanSwapchain> m_VulkanSwapchain;
 		std::unique_ptr<VulkanSynchronization> m_VulkanSynchronization;
+		std::unique_ptr<VulkanCommandPool> m_VulkanCommandPool;
 
 		bool m_VolkInitialized = false;
 	};

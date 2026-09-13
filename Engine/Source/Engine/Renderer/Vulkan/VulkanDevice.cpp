@@ -350,7 +350,6 @@ namespace Engine
 		};
 
 		const float l_QueuePriority = 1.0f;
-
 		VkDeviceQueueCreateInfo l_QueueCreateInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,

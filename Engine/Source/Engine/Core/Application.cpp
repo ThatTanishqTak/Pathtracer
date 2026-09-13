@@ -121,6 +121,14 @@ namespace Engine
 
 		while (!m_Window->ShouldClose())
 		{
+			// Nothing can be presented while minimized, sleep on the event queue instead of spinning
+			if (m_Window->IsMinimized())
+			{
+				m_Window->WaitEvents();
+
+				continue;
+			}
+
 			m_Window->PollEvents();
 
 			if (m_Window->ConsumeFramebufferResized())
@@ -128,10 +136,11 @@ namespace Engine
 				m_Renderer->OnFramebufferResized();
 			}
 
-			m_Renderer->Render();
-
-			// Placeholder pacing until Render blocks on present/vsync
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			// Present paces the loop, only a skipped frame needs a small yield to avoid a busy spin
+			if (!m_Renderer->Render())
+			{
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
 		}
 
 		PT_CORE_INFO("------- EXITING MAIN LOOP -------");
