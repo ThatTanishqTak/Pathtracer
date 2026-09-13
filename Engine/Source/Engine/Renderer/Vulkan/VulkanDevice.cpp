@@ -70,6 +70,44 @@ namespace Engine
 			return true;
 		}
 
+		bool SupportsRequiredFeatures(VkPhysicalDevice device)
+		{
+			// Query the supported core feature chain, declared newest first so each pNext can point at the next struct
+			VkPhysicalDeviceVulkan14Features l_Supported14{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES };
+			VkPhysicalDeviceVulkan13Features l_Supported13{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .pNext = &l_Supported14 };
+			VkPhysicalDeviceVulkan12Features l_Supported12{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &l_Supported13 };
+			VkPhysicalDeviceVulkan11Features l_Supported11{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &l_Supported12 };
+			VkPhysicalDeviceFeatures2 l_SupportedFeatures{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &l_Supported11 };
+
+			vkGetPhysicalDeviceFeatures2(device, &l_SupportedFeatures);
+
+			const struct { const char* Name; VkBool32 Supported; } l_RequiredFeatures[] =
+			{
+				{ "descriptorIndexing", l_Supported12.descriptorIndexing },
+				{ "scalarBlockLayout", l_Supported12.scalarBlockLayout },
+				{ "timelineSemaphore", l_Supported12.timelineSemaphore },
+				{ "bufferDeviceAddress", l_Supported12.bufferDeviceAddress },
+				{ "synchronization2", l_Supported13.synchronization2 },
+				{ "dynamicRendering", l_Supported13.dynamicRendering },
+				{ "maintenance4", l_Supported13.maintenance4 },
+				{ "maintenance5", l_Supported14.maintenance5 },
+				{ "maintenance6", l_Supported14.maintenance6 },
+				{ "pushDescriptor", l_Supported14.pushDescriptor },
+			};
+
+			for (const auto& l_Feature : l_RequiredFeatures)
+			{
+				if (l_Feature.Supported != VK_TRUE)
+				{
+					PT_CORE_TRACE("Missing required device feature: {}", l_Feature.Name);
+
+					return false;
+				}
+			}
+
+			return true;
+		}
+
 		uint64_t GetDeviceLocalMemorySize(VkPhysicalDevice device)
 		{
 			VkPhysicalDeviceMemoryProperties l_MemoryProperties{};
@@ -277,40 +315,7 @@ namespace Engine
 	{
 		PT_CORE_TRACE("Creating Logical Device");
 
-		// Query the supported core feature chain, declared newest first so each pNext can point at the next struct
-		VkPhysicalDeviceVulkan14Features l_Supported14{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES };
-		VkPhysicalDeviceVulkan13Features l_Supported13{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .pNext = &l_Supported14 };
-		VkPhysicalDeviceVulkan12Features l_Supported12{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &l_Supported13 };
-		VkPhysicalDeviceVulkan11Features l_Supported11{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &l_Supported12 };
-		VkPhysicalDeviceFeatures2 l_SupportedFeatures{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &l_Supported11 };
-
-		vkGetPhysicalDeviceFeatures2(m_PhysicalDevice, &l_SupportedFeatures);
-
-		const struct { const char* Name; VkBool32 Supported; } l_RequiredFeatures[] =
-		{
-			{ "descriptorIndexing", l_Supported12.descriptorIndexing },
-			{ "scalarBlockLayout", l_Supported12.scalarBlockLayout },
-			{ "timelineSemaphore", l_Supported12.timelineSemaphore },
-			{ "bufferDeviceAddress", l_Supported12.bufferDeviceAddress },
-			{ "synchronization2", l_Supported13.synchronization2 },
-			{ "dynamicRendering", l_Supported13.dynamicRendering },
-			{ "maintenance4", l_Supported13.maintenance4 },
-			{ "maintenance5", l_Supported14.maintenance5 },
-			{ "maintenance6", l_Supported14.maintenance6 },
-			{ "pushDescriptor", l_Supported14.pushDescriptor },
-		};
-
-		for (const auto& l_Feature : l_RequiredFeatures)
-		{
-			if (l_Feature.Supported != VK_TRUE)
-			{
-				PT_CORE_CRITICAL("Required device feature is not supported: {}", l_Feature.Name);
-
-				return;
-			}
-		}
-
-		// Enable exactly the features that were verified above, chained the same way
+		// Enable exactly the features that IsDeviceSuitable verified during selection, chained the same way
 		VkPhysicalDeviceVulkan14Features l_Enabled14
 		{
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
@@ -399,7 +404,7 @@ namespace Engine
 
 	bool VulkanDevice::IsDeviceSuitable(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties, VkSurfaceKHR surface, uint32_t& graphicsQueueFamilyIndex)
 	{
-		if (properties.apiVersion < VK_API_VERSION_1_4 || !FindGraphicsQueueFamily(device, surface, graphicsQueueFamilyIndex) || !IsDeviceExtensionSupported(device, VK_KHR_SWAPCHAIN_EXTENSION_NAME) || !HasSurfaceFormatsAndPresentModes(device, surface))
+		if (properties.apiVersion < VK_API_VERSION_1_4 || !FindGraphicsQueueFamily(device, surface, graphicsQueueFamilyIndex) || !IsDeviceExtensionSupported(device, VK_KHR_SWAPCHAIN_EXTENSION_NAME) || !HasSurfaceFormatsAndPresentModes(device, surface) || !SupportsRequiredFeatures(device))
 		{
 			return false;
 		}

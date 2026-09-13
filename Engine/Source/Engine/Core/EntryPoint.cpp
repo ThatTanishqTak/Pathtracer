@@ -37,13 +37,27 @@ int main(int argumentCount, char** arguments)
 	}
 	catch (const std::exception& exception)
 	{
-		PT_CORE_ERROR("Fatal error: {}", exception.what());
+		if (Engine::Log::IsInitialized())
+		{
+			PT_CORE_ERROR("Fatal error: {}", exception.what());
+		}
+		else
+		{
+			std::cerr << "Fatal error: " << exception.what() << '\n';
+		}
 
 		l_ExitCode = 1;
 	}
 	catch (...)
 	{
-		PT_CORE_ERROR("Fatal error: unknown exception");
+		if (Engine::Log::IsInitialized())
+		{
+			PT_CORE_ERROR("Fatal error: unknown exception");
+		}
+		else
+		{
+			std::cerr << "Fatal error: unknown exception\n";
+		}
 
 		l_ExitCode = 1;
 	}

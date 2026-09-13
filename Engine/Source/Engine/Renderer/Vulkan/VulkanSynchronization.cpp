@@ -117,7 +117,22 @@ namespace Engine
 		DestroyFrameSemaphores();
 
 		CreateFrameSemaphores();
+		if (m_ImageAvailableSemaphores.empty())
+		{
+			PT_CORE_ERROR("Failed to recreate frame semaphores, retrying next frame");
+
+			return;
+		}
+
 		CreateImageSemaphores(m_Swapchain->GetImageCount());
+		if (m_RenderFinishedSemaphores.empty())
+		{
+			PT_CORE_ERROR("Failed to recreate image semaphores, retrying next frame");
+
+			DestroyFrameSemaphores();
+
+			return;
+		}
 
 		m_SwapchainGeneration = m_Swapchain->GetGeneration();
 
@@ -222,6 +237,31 @@ namespace Engine
 		}
 
 		WaitForTimelineValue(m_SubmittedFrameCount);
+	}
+
+	void VulkanSynchronization::RecoverAbandonedAcquire()
+	{
+		if (!IsInitialized() || m_ImageAvailableSemaphores.empty())
+		{
+			return;
+		}
+
+		vkDeviceWaitIdle(m_Device->GetHandle());
+
+		const uint32_t l_FrameIndex = GetFrameIndex();
+
+		vkDestroySemaphore(m_Device->GetHandle(), m_ImageAvailableSemaphores[l_FrameIndex], nullptr);
+		m_ImageAvailableSemaphores[l_FrameIndex] = VK_NULL_HANDLE;
+
+		VkSemaphoreCreateInfo l_SemaphoreCreateInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+
+		const VkResult l_Result = vkCreateSemaphore(m_Device->GetHandle(), &l_SemaphoreCreateInfo, nullptr, &m_ImageAvailableSemaphores[l_FrameIndex]);
+		if (l_Result != VK_SUCCESS)
+		{
+			PT_CORE_ERROR("Failed to recreate image available semaphore: {}", static_cast<int>(l_Result));
+
+			DestroyFrameSemaphores();
+		}
 	}
 
 	VkSemaphore VulkanSynchronization::GetImageAvailableSemaphore() const

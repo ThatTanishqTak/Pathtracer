@@ -596,6 +596,12 @@ namespace Engine
 		int l_Height = 0;
 		m_Window->GetFramebufferSize(l_Width, l_Height);
 
+		// A zero-size framebuffer must defer creation, clamping would silently raise it to minImageExtent
+		if (l_Width <= 0 || l_Height <= 0)
+		{
+			return VkExtent2D{ 0, 0 };
+		}
+
 		VkExtent2D l_Extent
 		{
 			.width = static_cast<uint32_t>(l_Width),

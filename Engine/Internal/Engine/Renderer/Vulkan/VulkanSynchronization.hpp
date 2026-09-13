@@ -35,6 +35,7 @@ namespace Engine
 		bool WaitForFrame();
 		bool Submit(VkQueue queue, VkCommandBuffer commandBuffer, uint32_t imageIndex);
 		void WaitForAllFrames();
+		void RecoverAbandonedAcquire();
 
 		uint32_t GetFrameIndex() const { return static_cast<uint32_t>(m_SubmittedFrameCount % k_MaxFramesInFlight); }
 

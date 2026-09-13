@@ -13,6 +13,7 @@ namespace Engine
 		std::shared_ptr<spdlog::logger> s_ClientLogger;
 
 		LogLevel s_Level = LogLevel::Trace;
+		bool s_LevelExplicitlySet = false;
 
 		bool s_Initialized = false;
 
@@ -70,11 +71,14 @@ namespace Engine
 		s_ClientLogger->flush_on(spdlog::level::warn);
 		spdlog::register_logger(s_ClientLogger);
 
+		if (!s_LevelExplicitlySet)
+		{
 #ifdef PT_DEBUG
-		s_Level = LogLevel::Trace;
+			s_Level = LogLevel::Trace;
 #else
-		s_Level = LogLevel::Info;
+			s_Level = LogLevel::Info;
 #endif
+		}
 		s_Initialized = true;
 	}
 
@@ -100,6 +104,7 @@ namespace Engine
 	void Log::SetLevel(LogLevel level)
 	{
 		s_Level = level;
+		s_LevelExplicitlySet = true;
 	}
 
 	LogLevel Log::GetLevel()
@@ -109,7 +114,11 @@ namespace Engine
 
 	void Log::Dispatch(LogCategory category, LogLevel level, std::string message)
 	{
-		const std::shared_ptr<spdlog::logger>& l_Logger = (category == LogCategory::Core) ? s_CoreLogger : s_ClientLogger;
+		const std::shared_ptr<spdlog::logger> l_Logger = (category == LogCategory::Core) ? s_CoreLogger : s_ClientLogger;
+		if (!l_Logger)
+		{
+			return;
+		}
 
 		l_Logger->log(ToBackendLevel(level), message);
 	}

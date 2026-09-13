@@ -22,7 +22,14 @@ namespace Engine
 		auto l_Application = std::make_unique<Application>();
 		l_Application->Initialize(l_Specification);
 
-		PT_APP_INFO("------- APPLICATION CREATED -------");
+		if (l_Application->IsInitialized())
+		{
+			PT_APP_INFO("------- APPLICATION CREATED -------");
+		}
+		else
+		{
+			PT_APP_ERROR("------- APPLICATION CREATION FAILED -------");
+		}
 
 		return l_Application;
 	}

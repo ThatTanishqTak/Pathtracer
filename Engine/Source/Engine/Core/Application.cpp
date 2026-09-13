@@ -5,6 +5,9 @@
 #include "Engine/Renderer/Renderer.hpp"
 #include "Engine/Core/Log.hpp"
 
+#include <chrono>
+#include <thread>
+
 namespace Engine
 {
 	Application::Application() = default;
@@ -126,6 +129,9 @@ namespace Engine
 			}
 
 			m_Renderer->Render();
+
+			// Placeholder pacing until Render blocks on present/vsync
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		}
 
 		PT_CORE_INFO("------- EXITING MAIN LOOP -------");

@@ -19,12 +19,19 @@ namespace Engine
 
 	void VulkanRenderer::Initialize(const Window& window)
 	{
-		if (m_VolkInitialized)
+		if (IsInitialized())
 		{
 			PT_CORE_WARN("Vulkan renderer is already initialized");
 
 			return;
 		}
+
+		if (m_VolkInitialized)
+		{
+			Shutdown();
+		}
+
+		PT_CORE_INFO("------- INITIALIZING VULKAN RENDERER -------");
 
 		InitializeVolk();
 		if (!m_VolkInitialized)
@@ -73,6 +80,8 @@ namespace Engine
 		{
 			return;
 		}
+
+		PT_CORE_INFO("------- VULKAN RENDERER INITIALIZED -------");
 	}
 
 	bool VulkanRenderer::IsInitialized() const
@@ -90,6 +99,8 @@ namespace Engine
 
 	void VulkanRenderer::Shutdown()
 	{
+		PT_CORE_INFO("------- SHUTTING DOWN VULKAN RENDERER -------");
+
 		if (m_VulkanSynchronization)
 		{
 			m_VulkanSynchronization->Shutdown();
@@ -127,6 +138,8 @@ namespace Engine
 		}
 
 		ShutdownVolk();
+
+		PT_CORE_INFO("------- VULKAN RENDERER SHUTDOWN COMPLETE -------");
 	}
 
 	void VulkanRenderer::InitializeVolk()
