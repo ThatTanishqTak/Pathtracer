@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Engine/Input/Input.hpp"
+
 #include <memory>
 #include <string>
 
@@ -15,6 +17,7 @@ namespace Engine
 		bool WindowResizable = false;
 	};
 
+	class ApplicationClient;
 	class Platform;
 	class Renderer;
 	class Window;
@@ -28,12 +31,15 @@ namespace Engine
 		Application(const Application&) = delete;
 		Application& operator=(const Application&) = delete;
 
-		void Initialize(const ApplicationSpecification& specification = {});
+		void Initialize(const ApplicationSpecification& specification, std::unique_ptr<ApplicationClient> client);
 		void Shutdown();
 
-		void Run();
+		int Run();
 
 		void Close();
+
+		void SetMouseCaptured(bool captured);
+		bool IsMouseCaptured() const;
 
 		bool IsInitialized() const;
 
@@ -43,13 +49,20 @@ namespace Engine
 		const ApplicationSpecification& GetSpecification() const;
 
 	private:
+		void OnInputEvent(const InputEvent& event);
+		void StopClient() noexcept;
+
 		ApplicationSpecification m_Specification;
 
 		std::unique_ptr<Platform> m_Platform;
 		std::unique_ptr<Window> m_Window;
 		std::unique_ptr<Renderer> m_Renderer;
+		std::unique_ptr<ApplicationClient> m_Client;
+
+		InputState m_Input;
 
 		bool m_Initialized = false;
+		bool m_ClientStarted = false;
 	};
 
 	// Implemented by the client

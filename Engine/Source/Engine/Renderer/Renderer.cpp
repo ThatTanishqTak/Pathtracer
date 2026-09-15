@@ -54,14 +54,14 @@ namespace Engine
 		PT_CORE_INFO("------- RENDERER SHUTDOWN COMPLETE -------");
 	}
 
-	RenderOutcome Renderer::Render()
+	RenderOutcome Renderer::Render(const RenderRequest& request)
 	{
 		if (!m_VulkanRenderer)
 		{
 			return RenderOutcome::Fatal;
 		}
 
-		return m_VulkanRenderer->Render();
+		return m_VulkanRenderer->Render(request);
 	}
 
 	void Renderer::OnFramebufferResized()

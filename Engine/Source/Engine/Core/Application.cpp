@@ -1,19 +1,57 @@
 #include "Engine/Core/Application.hpp"
 
+#include "Engine/Core/ApplicationClient.hpp"
 #include "Engine/Platform/Platform.hpp"
 #include "Engine/Window/Window.hpp"
 #include "Engine/Renderer/Renderer.hpp"
 #include "Engine/Core/Log.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <thread>
+#include <utility>
 
 namespace Engine
 {
+	namespace
+	{
+		constexpr float k_MaxDeltaSeconds = 0.1f;
+	}
+
+	ApplicationServices::ApplicationServices(Application& application) : m_Application(&application)
+	{
+
+	}
+
+	void ApplicationServices::RequestClose()
+	{
+		m_Application->Close();
+	}
+
+	void ApplicationServices::SetMouseCaptured(bool captured)
+	{
+		m_Application->SetMouseCaptured(captured);
+	}
+
+	bool ApplicationServices::IsMouseCaptured() const
+	{
+		return m_Application->IsMouseCaptured();
+	}
+
+	int ApplicationServices::GetWindowWidth() const
+	{
+		return m_Application->GetWindowWidth();
+	}
+
+	int ApplicationServices::GetWindowHeight() const
+	{
+		return m_Application->GetWindowHeight();
+	}
+
 	Application::Application() = default;
 	Application::~Application() = default;
 
-	void Application::Initialize(const ApplicationSpecification& specification)
+	void Application::Initialize(const ApplicationSpecification& specification, std::unique_ptr<ApplicationClient> client)
 	{
 		if (m_Initialized)
 		{
@@ -23,6 +61,15 @@ namespace Engine
 		m_Specification = specification;
 
 		PT_CORE_INFO("------- INITIALIZING APPLICATION -------");
+
+		if (!client)
+		{
+			PT_CORE_CRITICAL("No application client was supplied, aborting startup");
+
+			return;
+		}
+
+		m_Client = std::move(client);
 
 		m_Platform = std::make_unique<Platform>();
 		m_Platform->Initialize();
@@ -52,6 +99,8 @@ namespace Engine
 			return;
 		}
 
+		m_Window->SetEventCallback([this](const InputEvent& event) { OnInputEvent(event); });
+
 		m_Renderer = std::make_unique<Renderer>();
 		m_Renderer->Initialize(*m_Window);
 		if (!m_Renderer->IsInitialized())
@@ -70,7 +119,7 @@ namespace Engine
 
 	void Application::Shutdown()
 	{
-		if (!m_Renderer && !m_Window && !m_Platform)
+		if (!m_Renderer && !m_Window && !m_Platform && !m_Client)
 		{
 			m_Initialized = false;
 
@@ -78,6 +127,8 @@ namespace Engine
 		}
 
 		PT_CORE_INFO("------- SHUTTING DOWN APPLICATION -------");
+
+		StopClient();
 
 		if (m_Renderer)
 		{
@@ -97,28 +148,56 @@ namespace Engine
 			m_Platform.reset();
 		}
 
+		m_Client.reset();
+
+		m_Input = InputState{};
 		m_Initialized = false;
 
 		PT_CORE_INFO("------- APPLICATION SHUTDOWN COMPLETE -------");
 	}
 
-	void Application::Run()
+	int Application::Run()
 	{
 		if (!m_Initialized)
 		{
 			PT_CORE_ERROR("Run called before a successful Initialize");
 
-			return;
+			return 1;
 		}
 
 		PT_CORE_INFO("------- ENTERING MAIN LOOP -------");
 
-		while (!m_Window->ShouldClose())
+		int l_ExitCode = 0;
+
+		m_Input = InputState{};
+		m_Input.HasFocus = m_Window->HasFocus();
+		m_Input.MouseCaptured = m_Window->IsRelativeMouseMode();
+
+		ApplicationServices l_Services(*this);
+
+		m_ClientStarted = true;
+		m_Client->OnStart(l_Services);
+
+		using Clock = std::chrono::steady_clock;
+
+		const Clock::time_point l_StartTime = Clock::now();
+		Clock::time_point l_PreviousTime = l_StartTime;
+
+		FrameTime l_FrameTime;
+
+		while (true)
 		{
-			// Nothing can be presented while minimized, sleep on the event queue instead of spinning
+			// 1. Edges, deltas and wheel movement only live for one iteration
+			m_Input.ResetTransient();
+
+			// 2. Poll, notify the client through the window callback, keep close and resize tracking
 			if (m_Window->IsMinimized())
 			{
+				// Nothing can be presented while minimized, sleep on the event queue instead of spinning
 				m_Window->WaitEvents();
+
+				// Anything accumulated while minimized is dropped by the reset at the top of the next iteration, so restoring the window cannot produce one big jump
+				l_PreviousTime = Clock::now();
 
 				continue;
 			}
@@ -130,24 +209,155 @@ namespace Engine
 				m_Renderer->OnFramebufferResized();
 			}
 
-			const RenderOutcome l_Outcome = m_Renderer->Render();
+			// 3. Close before starting new GPU work
+			if (m_Window->ShouldClose())
+			{
+				break;
+			}
+
+			// 4. Monotonic time, the simulation step is clamped but the real elapsed time is kept for statistics
+			const Clock::time_point l_Now = Clock::now();
+			const float l_Elapsed = std::chrono::duration<float>(l_Now - l_PreviousTime).count();
+			l_PreviousTime = l_Now;
+
+			l_FrameTime.ElapsedSeconds = l_Elapsed;
+			l_FrameTime.DeltaSeconds = std::min(l_Elapsed, k_MaxDeltaSeconds);
+			l_FrameTime.TotalSeconds = std::chrono::duration<double>(l_Now - l_StartTime).count();
+
+			// 5. Client update and its render request
+			m_Client->Update(l_FrameTime, m_Input);
+
+			const RenderRequest l_Request = m_Client->GetRenderRequest();
+
+			// 6. Render and react to the outcome
+			const RenderOutcome l_Outcome = m_Renderer->Render(l_Request);
 
 			if (l_Outcome == RenderOutcome::Fatal)
 			{
-				// The renderer already logged the original reason, only a terminal outcome stops the loop, never a skipped frame
 				PT_CORE_CRITICAL("Renderer reported a fatal error, leaving the main loop");
+
+				l_ExitCode = 1;
 
 				break;
 			}
 
-			// Present paces the loop, only a skipped frame needs a small yield to avoid a busy spin
 			if (l_Outcome == RenderOutcome::Skipped)
 			{
 				std::this_thread::sleep_for(std::chrono::milliseconds(1));
 			}
+
+			++l_FrameTime.FrameIndex;
 		}
 
+		StopClient();
+
 		PT_CORE_INFO("------- EXITING MAIN LOOP -------");
+
+		return l_ExitCode;
+	}
+
+	void Application::OnInputEvent(const InputEvent& event)
+	{
+		switch (event.Type)
+		{
+			case InputEventType::KeyPressed:
+			{
+				const size_t l_Index = InputState::Index(event.KeyCode);
+
+				if (!event.Repeat && !m_Input.KeysDown[l_Index])
+				{
+					m_Input.KeysPressed[l_Index] = true;
+				}
+
+				m_Input.KeysDown[l_Index] = true;
+				break;
+			}
+			case InputEventType::KeyReleased:
+			{
+				const size_t l_Index = InputState::Index(event.KeyCode);
+
+				m_Input.KeysDown[l_Index] = false;
+				m_Input.KeysReleased[l_Index] = true;
+				break;
+			}
+			case InputEventType::MouseButtonPressed:
+			{
+				const size_t l_Index = InputState::Index(event.Button);
+
+				if (!m_Input.MouseButtonsDown[l_Index])
+				{
+					m_Input.MouseButtonsPressed[l_Index] = true;
+				}
+
+				m_Input.MouseButtonsDown[l_Index] = true;
+				m_Input.MouseX = event.X;
+				m_Input.MouseY = event.Y;
+				break;
+			}
+			case InputEventType::MouseButtonReleased:
+			{
+				const size_t l_Index = InputState::Index(event.Button);
+
+				m_Input.MouseButtonsDown[l_Index] = false;
+				m_Input.MouseButtonsReleased[l_Index] = true;
+				m_Input.MouseX = event.X;
+				m_Input.MouseY = event.Y;
+				break;
+			}
+			case InputEventType::MouseMoved:
+			{
+				m_Input.MouseX = event.X;
+				m_Input.MouseY = event.Y;
+				m_Input.MouseDeltaX += event.DeltaX;
+				m_Input.MouseDeltaY += event.DeltaY;
+				break;
+			}
+			case InputEventType::MouseWheel:
+			{
+				m_Input.WheelX += event.X;
+				m_Input.WheelY += event.Y;
+				break;
+			}
+			case InputEventType::FocusGained:
+			{
+				m_Input.HasFocus = true;
+				break;
+			}
+			case InputEventType::FocusLost:
+			{
+				m_Input.HasFocus = false;
+				m_Input.ClearHeld();
+
+				SetMouseCaptured(false);
+				break;
+			}
+			case InputEventType::WindowResized:
+			{
+				break;
+			}
+		}
+
+		if (m_ClientStarted)
+		{
+			m_Client->OnEvent(event);
+		}
+	}
+
+	void Application::StopClient() noexcept
+	{
+		if (!m_ClientStarted)
+		{
+			return;
+		}
+
+		m_ClientStarted = false;
+
+		if (m_Client)
+		{
+			m_Client->OnStop();
+		}
+
+		SetMouseCaptured(false);
 	}
 
 	void Application::Close()
@@ -156,6 +366,29 @@ namespace Engine
 		{
 			m_Window->RequestClose();
 		}
+	}
+
+	void Application::SetMouseCaptured(bool captured)
+	{
+		if (!m_Window)
+		{
+			return;
+		}
+
+		if (m_Input.MouseCaptured == captured)
+		{
+			return;
+		}
+
+		if (m_Window->SetRelativeMouseMode(captured))
+		{
+			m_Input.MouseCaptured = captured;
+		}
+	}
+
+	bool Application::IsMouseCaptured() const
+	{
+		return m_Input.MouseCaptured;
 	}
 
 	bool Application::IsInitialized() const

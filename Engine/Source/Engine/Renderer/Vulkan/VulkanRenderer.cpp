@@ -16,12 +16,6 @@
 
 namespace Engine
 {
-	namespace
-	{
-		// Placeholder until the pathtracer output is blitted into the swapchain
-		constexpr VkClearColorValue k_ClearColor{ .float32 = { 0.05f, 0.05f, 0.05f, 1.0f } };
-	}
-
 	VulkanRenderer::VulkanRenderer() = default;
 	VulkanRenderer::~VulkanRenderer() = default;
 
@@ -121,7 +115,7 @@ namespace Engine
 		return l_CoreReady && l_FrameReady;
 	}
 
-	RenderOutcome VulkanRenderer::Render()
+	RenderOutcome VulkanRenderer::Render(const RenderRequest& request)
 	{
 		if (m_Fatal || !IsInitialized())
 		{
@@ -203,7 +197,7 @@ namespace Engine
 			return FailFrame(l_Frame, "beginning the command buffer", l_BeginResult);
 		}
 
-		RecordFrame(l_CommandBuffer, l_Frame.ImageIndex);
+		RecordFrame(l_CommandBuffer, l_Frame.ImageIndex, request);
 
 		const VkResult l_EndResult = m_VulkanCommandPool->End(l_Frame.FrameSlot);
 		if (l_EndResult != VK_SUCCESS)
@@ -275,9 +269,12 @@ namespace Engine
 		return RenderOutcome::Fatal;
 	}
 
-	void VulkanRenderer::RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex)
+	void VulkanRenderer::RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderRequest& request)
 	{
 		VkImage l_Image = m_VulkanSwapchain->GetImage(imageIndex);
+
+		// Placeholder until the pathtracer output is blitted into the swapchain, the client picks the color
+		const VkClearColorValue l_ClearColor{ .float32 = { request.ClearColor[0], request.ClearColor[1], request.ClearColor[2], request.ClearColor[3] } };
 
 		const VkImageSubresourceRange l_ColorRange
 		{
@@ -313,7 +310,7 @@ namespace Engine
 
 		vkCmdPipelineBarrier2(commandBuffer, &l_ToTransferDependency);
 
-		vkCmdClearColorImage(commandBuffer, l_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &k_ClearColor, 1, &l_ColorRange);
+		vkCmdClearColorImage(commandBuffer, l_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &l_ClearColor, 1, &l_ColorRange);
 
 		// Presentation engine reads are made visible through the render finished semaphore, the barrier only changes layout
 		VkImageMemoryBarrier2 l_ToPresentBarrier

@@ -37,7 +37,7 @@ namespace Engine
 		void Shutdown();
 
 		bool IsInitialized() const;
-		RenderOutcome Render();
+		RenderOutcome Render(const RenderRequest& request);
 
 		void OnFramebufferResized();
 
@@ -63,7 +63,7 @@ namespace Engine
 		void InitializeVolk();
 		void ShutdownVolk();
 
-		void RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex);
+		void RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderRequest& request);
 
 		// Logs the original reason and enters the terminal state, every later Render() returns Fatal until Shutdown
 		RenderOutcome FailFrame(const FrameRecord& frame, const char* stage, VkResult result);

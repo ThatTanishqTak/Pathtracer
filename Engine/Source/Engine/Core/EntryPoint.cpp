@@ -26,7 +26,7 @@ int main(int argumentCount, char** arguments)
 		}
 		else if (l_Application->IsInitialized())
 		{
-			l_Application->Run();
+			l_ExitCode = l_Application->Run();
 		}
 		else
 		{

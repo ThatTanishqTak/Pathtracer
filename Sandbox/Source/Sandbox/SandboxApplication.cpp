@@ -1,5 +1,7 @@
 #include "Engine/Engine.hpp"
 
+#include "Sandbox/SandboxClient.hpp"
+
 namespace Engine
 {
 	std::unique_ptr<Application> CreateApplication(int argumentCount, char** arguments)
@@ -20,7 +22,7 @@ namespace Engine
 		PT_APP_TRACE("Window Resizable: {}", l_Specification.WindowResizable);
 
 		auto l_Application = std::make_unique<Application>();
-		l_Application->Initialize(l_Specification);
+		l_Application->Initialize(l_Specification, std::make_unique<Sandbox::SandboxClient>());
 
 		if (l_Application->IsInitialized())
 		{

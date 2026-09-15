@@ -4,6 +4,9 @@
 #error "Engine internal header, not part of the public API"
 #endif
 
+#include "Engine/Input/Input.hpp"
+
+#include <functional>
 #include <string>
 
 struct SDL_Window;
@@ -24,6 +27,8 @@ namespace Engine
 	class Window
 	{
 	public:
+		using EventCallback = std::function<void(const InputEvent&)>;
+
 		Window();
 		~Window();
 
@@ -35,11 +40,19 @@ namespace Engine
 		void Initialize(const WindowSpecification& specification = {});
 		void Shutdown();
 
+		// Receives every translated input event, close and resize are still tracked by the window itself
+		void SetEventCallback(EventCallback callback);
+
 		void PollEvents();
 		void WaitEvents();
 		bool ShouldClose() const;
 		bool IsMinimized() const;
+		bool HasFocus() const;
 		void RequestClose();
+
+		// Relative mouse mode hides the cursor and reports motion as deltas only
+		bool SetRelativeMouseMode(bool enabled);
+		bool IsRelativeMouseMode() const;
 
 		SDL_Window* GetNativeWindow() const { return m_NativeWindowHandle; }
 		bool IsInitialized() const { return m_NativeWindowHandle != nullptr; }
@@ -54,11 +67,14 @@ namespace Engine
 
 	private:
 		void HandleEvent(const SDL_Event& event);
+		void Dispatch(const InputEvent& event);
 
 		SDL_Window* m_NativeWindowHandle = nullptr;
 
 		bool m_ShouldClose = false;
 		bool m_FramebufferResized = false;
+
+		EventCallback m_EventCallback;
 
 		WindowSpecification m_Specification;
 	};

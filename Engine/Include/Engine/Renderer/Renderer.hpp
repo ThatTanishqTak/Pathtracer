@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Engine/Renderer/RenderRequest.hpp"
+
 #include <memory>
 
 namespace Engine
@@ -28,7 +30,7 @@ namespace Engine
 		void Shutdown();
 
 		bool IsInitialized() const;
-		RenderOutcome Render();
+		RenderOutcome Render(const RenderRequest& request);
 
 		void OnFramebufferResized();
 
