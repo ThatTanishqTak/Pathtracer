@@ -37,6 +37,7 @@ namespace Engine
 		static void SetLevel(LogLevel level);
 		static LogLevel GetLevel();
 
+		// Logging is used from cleanup paths and destructors, so a failed format or allocation drops the message instead of throwing
 		template<typename... Arguments>
 		static void Write(LogCategory category, LogLevel level, std::format_string<Arguments...> format, Arguments&&... values)
 		{
@@ -45,7 +46,14 @@ namespace Engine
 				return;
 			}
 
-			Dispatch(category, level, std::format(format, std::forward<Arguments>(values)...));
+			try
+			{
+				Dispatch(category, level, std::format(format, std::forward<Arguments>(values)...));
+			}
+			catch (...)
+			{
+
+			}
 		}
 
 		static void Write(LogCategory category, LogLevel level, std::string_view message)
@@ -55,7 +63,14 @@ namespace Engine
 				return;
 			}
 
-			Dispatch(category, level, std::string(message));
+			try
+			{
+				Dispatch(category, level, std::string(message));
+			}
+			catch (...)
+			{
+
+			}
 		}
 
 	private:

@@ -31,8 +31,8 @@ namespace Engine
 		bool IsInitialized() const { return m_CommandPool != VK_NULL_HANDLE; }
 
 		// Resets the buffer and puts it in the recording state, the caller must have waited for its previous submission
-		bool Begin(uint32_t index);
-		bool End(uint32_t index);
+		VkResult Begin(uint32_t index);
+		VkResult End(uint32_t index);
 
 		VkCommandPool GetHandle() const { return m_CommandPool; }
 		VkCommandBuffer GetCommandBuffer(uint32_t index) const;

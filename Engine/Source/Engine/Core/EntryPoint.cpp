@@ -20,7 +20,7 @@ int main(int argumentCount, char** arguments)
 
 		if (!l_Application)
 		{
-			PT_CORE_ERROR("Fatal error: CreateApplication returned null");
+			PT_CORE_CRITICAL("CreateApplication returned null");
 
 			l_ExitCode = 1;
 		}
@@ -30,7 +30,7 @@ int main(int argumentCount, char** arguments)
 		}
 		else
 		{
-			PT_CORE_ERROR("Fatal error: application failed to initialize");
+			PT_CORE_CRITICAL("Application failed to initialize");
 
 			l_ExitCode = 1;
 		}
@@ -39,7 +39,7 @@ int main(int argumentCount, char** arguments)
 	{
 		if (Engine::Log::IsInitialized())
 		{
-			PT_CORE_ERROR("Fatal error: {}", exception.what());
+			PT_CORE_CRITICAL("Fatal error: {}", exception.what());
 		}
 		else
 		{
@@ -52,11 +52,11 @@ int main(int argumentCount, char** arguments)
 	{
 		if (Engine::Log::IsInitialized())
 		{
-			PT_CORE_ERROR("Fatal error: unknown exception");
+			PT_CORE_CRITICAL("Unknown exception");
 		}
 		else
 		{
-			std::cerr << "Fatal error: unknown exception\n";
+			std::cerr << "Unknown exception\n";
 		}
 
 		l_ExitCode = 1;
@@ -65,6 +65,7 @@ int main(int argumentCount, char** arguments)
 	if (l_Application)
 	{
 		l_Application->Shutdown();
+		l_Application.reset();
 	}
 
 	Engine::Log::Shutdown();

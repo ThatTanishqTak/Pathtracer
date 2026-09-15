@@ -30,6 +30,8 @@ namespace Engine
 
 		bool IsInitialized() const { return m_Device != VK_NULL_HANDLE; }
 
+		VkResult WaitIdle() const;
+
 		VkDevice GetHandle() const { return m_Device; }
 		VkPhysicalDevice GetPhysicalDevice() const { return m_PhysicalDevice; }
 		VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }

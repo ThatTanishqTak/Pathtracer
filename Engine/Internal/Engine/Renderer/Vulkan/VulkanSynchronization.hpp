@@ -32,28 +32,35 @@ namespace Engine
 
 		bool IsInitialized() const { return m_TimelineSemaphore != VK_NULL_HANDLE; }
 
-		bool WaitForFrame();
-		bool Submit(VkQueue queue, VkCommandBuffer commandBuffer, uint32_t imageIndex);
-		void WaitForAllFrames();
-		void RecoverAbandonedAcquire();
+		VkResult WaitForFrame();
+		VkResult Submit(VkQueue queue, VkCommandBuffer commandBuffer, uint32_t imageIndex, uint64_t& submittedValue);
+		VkResult WaitForAllFrames();
+
+		void MarkAcquirePending();
+
+		VkResult WaitForPendingAcquires();
 
 		uint32_t GetFrameIndex() const { return static_cast<uint32_t>(m_SubmittedFrameCount % k_MaxFramesInFlight); }
 
 		VkSemaphore GetImageAvailableSemaphore() const;
+		VkFence GetAcquireFence() const;
 		VkSemaphore GetRenderFinishedSemaphore(uint32_t imageIndex) const;
 		VkSemaphore GetTimelineSemaphore() const { return m_TimelineSemaphore; }
 		uint64_t GetSubmittedFrameCount() const { return m_SubmittedFrameCount; }
 
 	private:
-		void CreateTimelineSemaphore();
-		void CreateFrameSemaphores();
-		void CreateImageSemaphores(uint32_t swapchainImageCount);
-		void RehookBinarySemaphores();
+		VkResult CreateTimelineSemaphore();
+		VkResult CreateFrameSemaphores();
+		VkResult CreateAcquireFences();
+		VkResult CreateImageSemaphores(uint32_t swapchainImageCount);
+		VkResult RehookBinarySemaphores();
 		void DestroyImageSemaphores();
 		void DestroyFrameSemaphores();
+		void DestroyAcquireFences();
 		void DestroyTimelineSemaphore();
 
-		bool WaitForTimelineValue(uint64_t value);
+		VkResult WaitForAcquire(uint32_t frameSlot);
+		VkResult WaitForTimelineValue(uint64_t value);
 
 	private:
 		const VulkanDevice* m_Device = nullptr;
@@ -64,6 +71,8 @@ namespace Engine
 		uint64_t m_SwapchainGeneration = 0;
 
 		std::vector<VkSemaphore> m_ImageAvailableSemaphores;
+		std::vector<VkFence> m_AcquireFences;
+		std::vector<bool> m_AcquireFencePending;
 		std::vector<VkSemaphore> m_RenderFinishedSemaphores;
 	};
 }

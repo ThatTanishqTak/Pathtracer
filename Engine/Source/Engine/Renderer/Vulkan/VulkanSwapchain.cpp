@@ -143,32 +143,29 @@ namespace Engine
 		m_Surface = surface.GetHandle();
 		m_Window = &window;
 
-		CreateSwapchain();
-		if (m_Swapchain == VK_NULL_HANDLE)
+		const SwapchainResult l_Result = Build();
+		switch (l_Result.Status)
 		{
-			if (m_NeedsRecreate)
+			case SwapchainStatus::Success:
 			{
+				PT_CORE_INFO("------- VULKAN SWAPCHAIN INITIALIZED -------");
+				break;
+			}
+			case SwapchainStatus::Deferred:
+			{
+				// Zero-sized framebuffer at startup, the renderer recreates once the window has a size
 				PT_CORE_INFO("------- VULKAN SWAPCHAIN INITIALIZED (CREATION DEFERRED) -------");
 
-				return;
+				break;
 			}
+			default:
+			{
+				PT_CORE_CRITICAL("Swapchain creation failed: {}", VulkanUtilities::ResultToString(l_Result.Error));
 
-			Shutdown();
-
-			return;
+				Shutdown();
+				break;
+			}
 		}
-
-		CreateImageViews();
-		if (m_ImageViews.empty())
-		{
-			Shutdown();
-
-			return;
-		}
-
-		m_NeedsRecreate = false;
-
-		PT_CORE_INFO("------- VULKAN SWAPCHAIN INITIALIZED -------");
 	}
 
 	void VulkanSwapchain::Shutdown()
@@ -180,9 +177,10 @@ namespace Engine
 
 		PT_CORE_INFO("------- SHUTTING DOWN VULKAN SWAPCHAIN -------");
 
+		// Presentation retirement policy: a full device wait before the swapchain and its views are destroyed
 		if (m_Device != nullptr && m_Device->IsInitialized())
 		{
-			vkDeviceWaitIdle(m_Device->GetHandle());
+			m_Device->WaitIdle();
 		}
 
 		DestroyImageViews();
@@ -202,13 +200,13 @@ namespace Engine
 		PT_CORE_INFO("------- VULKAN SWAPCHAIN SHUTDOWN COMPLETE -------");
 	}
 
-	void VulkanSwapchain::Recreate()
+	SwapchainResult VulkanSwapchain::Recreate()
 	{
 		if (m_Device == nullptr || m_Window == nullptr || m_Surface == VK_NULL_HANDLE)
 		{
-			PT_CORE_WARN("Cannot recreate a swapchain that was never initialized");
+			PT_CORE_ERROR("Cannot recreate a swapchain that was never initialized");
 
-			return;
+			return SwapchainResult{ SwapchainStatus::Failed, VK_ERROR_INITIALIZATION_FAILED };
 		}
 
 		int l_Width = 0;
@@ -219,34 +217,28 @@ namespace Engine
 		{
 			m_NeedsRecreate = true;
 
-			return;
+			return SwapchainResult{ SwapchainStatus::Deferred };
 		}
 
 		PT_CORE_TRACE("Recreating Swapchain");
 
-		vkDeviceWaitIdle(m_Device->GetHandle());
+		const VkResult l_WaitResult = m_Device->WaitIdle();
+		if (l_WaitResult != VK_SUCCESS)
+		{
+			m_NeedsRecreate = true;
+
+			return SwapchainResult{ SwapchainStatus::Failed, l_WaitResult };
+		}
 
 		DestroyImageViews();
 
-		CreateSwapchain();
-		if (m_Swapchain == VK_NULL_HANDLE)
+		const SwapchainResult l_Result = Build();
+		if (l_Result.Status == SwapchainStatus::Success)
 		{
-			m_NeedsRecreate = true;
-
-			return;
+			PT_CORE_TRACE("Swapchain Recreated");
 		}
 
-		CreateImageViews();
-		if (m_ImageViews.empty())
-		{
-			m_NeedsRecreate = true;
-
-			return;
-		}
-
-		m_NeedsRecreate = false;
-
-		PT_CORE_TRACE("Swapchain Recreated");
+		return l_Result;
 	}
 
 	bool VulkanSwapchain::IsRenderable() const
@@ -294,60 +286,64 @@ namespace Engine
 		m_NeedsRecreate = true;
 	}
 
-	bool VulkanSwapchain::AcquireNextImage(VkSemaphore imageAvailableSemaphore, uint32_t& imageIndex)
+	SwapchainResult VulkanSwapchain::AcquireNextImage(VkSemaphore imageAvailableSemaphore, VkFence acquireFence, uint32_t& imageIndex)
 	{
 		imageIndex = 0;
 
 		if (m_Device == nullptr)
 		{
-			return false;
+			return SwapchainResult{ SwapchainStatus::Failed, VK_ERROR_INITIALIZATION_FAILED };
 		}
 
+		// Recreation is the renderer's job before it acquires, so it can retire outstanding acquires first
 		if (m_NeedsRecreate || m_Swapchain == VK_NULL_HANDLE)
 		{
-			Recreate();
-
-			return false;
+			return SwapchainResult{ SwapchainStatus::OutOfDate };
 		}
 
 		if (!IsRenderable())
 		{
 			m_NeedsRecreate = true;
 
-			return false;
+			return SwapchainResult{ SwapchainStatus::Deferred };
 		}
 
-		const VkResult l_Result = vkAcquireNextImageKHR(m_Device->GetHandle(), m_Swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+		const VkResult l_Result = vkAcquireNextImageKHR(m_Device->GetHandle(), m_Swapchain, UINT64_MAX, imageAvailableSemaphore, acquireFence, &imageIndex);
 
-		if (l_Result == VK_ERROR_OUT_OF_DATE_KHR)
+		switch (l_Result)
 		{
-			Recreate();
+			case VK_SUCCESS:
+			{
+				return SwapchainResult{ SwapchainStatus::Success };
+			}
+			case VK_SUBOPTIMAL_KHR:
+			{
+				// The image is acquired and the semaphore/fence will signal, only the next frame needs a replacement
+				m_NeedsRecreate = true;
 
-			return false;
+				return SwapchainResult{ SwapchainStatus::Suboptimal };
+			}
+			case VK_ERROR_OUT_OF_DATE_KHR:
+			{
+				// Nothing was acquired and neither the semaphore nor the fence is signaled
+				m_NeedsRecreate = true;
+
+				return SwapchainResult{ SwapchainStatus::OutOfDate };
+			}
+			default:
+			{
+				PT_CORE_ERROR("Failed vkAcquireNextImageKHR: {}", VulkanUtilities::ResultToString(l_Result));
+
+				return SwapchainResult{ SwapchainStatus::Failed, l_Result };
+			}
 		}
-
-		if (l_Result == VK_SUBOPTIMAL_KHR)
-		{
-			m_NeedsRecreate = true;
-
-			return true;
-		}
-
-		if (l_Result != VK_SUCCESS)
-		{
-			PT_CORE_ERROR("Failed vkAcquireNextImageKHR: {}", VulkanUtilities::ResultToString(l_Result));
-
-			return false;
-		}
-
-		return true;
 	}
 
-	bool VulkanSwapchain::Present(VkQueue queue, VkSemaphore renderFinishedSemaphore, uint32_t imageIndex)
+	SwapchainResult VulkanSwapchain::Present(VkQueue queue, VkSemaphore renderFinishedSemaphore, uint32_t imageIndex)
 	{
 		if (m_Swapchain == VK_NULL_HANDLE)
 		{
-			return false;
+			return SwapchainResult{ SwapchainStatus::Failed, VK_ERROR_INITIALIZATION_FAILED };
 		}
 
 		VkPresentInfoKHR l_PresentInfo
@@ -362,31 +358,64 @@ namespace Engine
 
 		const VkResult l_Result = vkQueuePresentKHR(queue, &l_PresentInfo);
 
-		if (l_Result == VK_SUBOPTIMAL_KHR)
+		switch (l_Result)
 		{
-			m_NeedsRecreate = true;
+			case VK_SUCCESS:
+			{
+				return SwapchainResult{ SwapchainStatus::Success };
+			}
+			case VK_SUBOPTIMAL_KHR:
+			{
+				m_NeedsRecreate = true;
 
-			return true;
+				return SwapchainResult{ SwapchainStatus::Suboptimal };
+			}
+			case VK_ERROR_OUT_OF_DATE_KHR:
+			{
+				// The request was rejected but its semaphore wait is still enqueued, so no synchronization object is left dangling
+				m_NeedsRecreate = true;
+
+				return SwapchainResult{ SwapchainStatus::OutOfDate };
+			}
+			default:
+			{
+				PT_CORE_ERROR("Failed vkQueuePresentKHR: {}", VulkanUtilities::ResultToString(l_Result));
+
+				return SwapchainResult{ SwapchainStatus::Failed, l_Result };
+			}
 		}
-
-		if (l_Result == VK_ERROR_OUT_OF_DATE_KHR)
-		{
-			m_NeedsRecreate = true;
-
-			return false;
-		}
-
-		if (l_Result != VK_SUCCESS)
-		{
-			PT_CORE_ERROR("Failed vkQueuePresentKHR: {}", VulkanUtilities::ResultToString(l_Result));
-
-			return false;
-		}
-
-		return true;
 	}
 
-	void VulkanSwapchain::CreateSwapchain()
+	SwapchainResult VulkanSwapchain::Build()
+	{
+		const SwapchainResult l_CreateResult = CreateSwapchain();
+		if (l_CreateResult.Status != SwapchainStatus::Success)
+		{
+			m_NeedsRecreate = true;
+
+			return l_CreateResult;
+		}
+
+		const VkResult l_ViewResult = CreateImageViews();
+		if (l_ViewResult != VK_SUCCESS)
+		{
+			DestroyImageViews();
+			DestroySwapchain();
+			m_Images.clear();
+			m_NeedsRecreate = true;
+
+			return SwapchainResult{ SwapchainStatus::Failed, l_ViewResult };
+		}
+
+		m_Generation++;
+		m_NeedsRecreate = false;
+
+		PT_CORE_TRACE("Swapchain Generation: {}", m_Generation);
+
+		return SwapchainResult{ SwapchainStatus::Success };
+	}
+
+	SwapchainResult VulkanSwapchain::CreateSwapchain()
 	{
 		PT_CORE_TRACE("Creating Swapchain");
 
@@ -396,34 +425,36 @@ namespace Engine
 		const VkResult l_CapabilitiesResult = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(l_PhysicalDevice, m_Surface, &l_Capabilities);
 		if (l_CapabilitiesResult != VK_SUCCESS)
 		{
-			PT_CORE_CRITICAL("Failed vkGetPhysicalDeviceSurfaceCapabilitiesKHR: {}", static_cast<int>(l_CapabilitiesResult));
+			PT_CORE_CRITICAL("Failed vkGetPhysicalDeviceSurfaceCapabilitiesKHR: {}", VulkanUtilities::ResultToString(l_CapabilitiesResult));
 
-			return;
+			return SwapchainResult{ SwapchainStatus::Failed, l_CapabilitiesResult };
 		}
 
 		if ((l_Capabilities.supportedUsageFlags & k_ImageUsage) != k_ImageUsage)
 		{
 			PT_CORE_CRITICAL("The surface does not support the required swapchain image usage");
 
-			return;
+			return SwapchainResult{ SwapchainStatus::Failed, VK_ERROR_FEATURE_NOT_PRESENT };
 		}
 
 		VkSurfaceKHR l_Surface = m_Surface;
 
 		std::vector<VkSurfaceFormatKHR> l_Formats;
-		if (VulkanUtilities::Enumerate(l_Formats, [l_PhysicalDevice, l_Surface](uint32_t* count, VkSurfaceFormatKHR* data) { return vkGetPhysicalDeviceSurfaceFormatsKHR(l_PhysicalDevice, l_Surface, count, data); }) != VK_SUCCESS || l_Formats.empty())
+		const VkResult l_FormatsResult = VulkanUtilities::Enumerate(l_Formats, [l_PhysicalDevice, l_Surface](uint32_t* count, VkSurfaceFormatKHR* data) { return vkGetPhysicalDeviceSurfaceFormatsKHR(l_PhysicalDevice, l_Surface, count, data); });
+		if (l_FormatsResult != VK_SUCCESS || l_Formats.empty())
 		{
-			PT_CORE_CRITICAL("Failed to enumerate surface formats");
+			PT_CORE_CRITICAL("Failed to enumerate surface formats: {}", VulkanUtilities::ResultToString(l_FormatsResult));
 
-			return;
+			return SwapchainResult{ SwapchainStatus::Failed, l_FormatsResult != VK_SUCCESS ? l_FormatsResult : VK_ERROR_INITIALIZATION_FAILED };
 		}
 
 		std::vector<VkPresentModeKHR> l_PresentModes;
-		if (VulkanUtilities::Enumerate(l_PresentModes, [l_PhysicalDevice, l_Surface](uint32_t* count, VkPresentModeKHR* data) { return vkGetPhysicalDeviceSurfacePresentModesKHR(l_PhysicalDevice, l_Surface, count, data); }) != VK_SUCCESS || l_PresentModes.empty())
+		const VkResult l_PresentModesResult = VulkanUtilities::Enumerate(l_PresentModes, [l_PhysicalDevice, l_Surface](uint32_t* count, VkPresentModeKHR* data) { return vkGetPhysicalDeviceSurfacePresentModesKHR(l_PhysicalDevice, l_Surface, count, data); });
+		if (l_PresentModesResult != VK_SUCCESS || l_PresentModes.empty())
 		{
-			PT_CORE_CRITICAL("Failed to enumerate surface present modes");
+			PT_CORE_CRITICAL("Failed to enumerate surface present modes: {}", VulkanUtilities::ResultToString(l_PresentModesResult));
 
-			return;
+			return SwapchainResult{ SwapchainStatus::Failed, l_PresentModesResult != VK_SUCCESS ? l_PresentModesResult : VK_ERROR_INITIALIZATION_FAILED };
 		}
 
 		const VkSurfaceFormatKHR l_SurfaceFormat = ChooseSurfaceFormat(l_Formats);
@@ -432,11 +463,10 @@ namespace Engine
 
 		if (l_Extent.width == 0 || l_Extent.height == 0)
 		{
+			// The previous swapchain, if any, stays alive but unusable until a later attempt replaces it
 			PT_CORE_TRACE("Swapchain extent is zero, deferring creation");
 
-			m_NeedsRecreate = true;
-
-			return;
+			return SwapchainResult{ SwapchainStatus::Deferred };
 		}
 
 		uint32_t l_ImageCount = l_Capabilities.minImageCount + 1;
@@ -474,7 +504,7 @@ namespace Engine
 			DestroySwapchain();
 			m_Images.clear();
 
-			return;
+			return SwapchainResult{ SwapchainStatus::Failed, l_Result };
 		}
 
 		if (l_OldSwapchain != VK_NULL_HANDLE)
@@ -492,25 +522,27 @@ namespace Engine
 		VkSwapchainKHR l_Handle = m_Swapchain;
 
 		m_Images.clear();
-		if (VulkanUtilities::Enumerate(m_Images, [l_Device, l_Handle](uint32_t* count, VkImage* data) { return vkGetSwapchainImagesKHR(l_Device, l_Handle, count, data); }) != VK_SUCCESS || m_Images.empty())
+		const VkResult l_ImagesResult = VulkanUtilities::Enumerate(m_Images, [l_Device, l_Handle](uint32_t* count, VkImage* data) { return vkGetSwapchainImagesKHR(l_Device, l_Handle, count, data); });
+		if (l_ImagesResult != VK_SUCCESS || m_Images.empty())
 		{
-			PT_CORE_CRITICAL("Failed to retrieve swapchain images");
+			PT_CORE_CRITICAL("Failed to retrieve swapchain images: {}", VulkanUtilities::ResultToString(l_ImagesResult));
 
 			DestroySwapchain();
+			m_Images.clear();
 
-			return;
+			return SwapchainResult{ SwapchainStatus::Failed, l_ImagesResult != VK_SUCCESS ? l_ImagesResult : VK_ERROR_INITIALIZATION_FAILED };
 		}
-
-		m_Generation++;
 
 		PT_CORE_TRACE("Swapchain Resolution: {}x{}", m_Extent.width, m_Extent.height);
 		PT_CORE_TRACE("Swapchain Images: {}", m_Images.size());
 		PT_CORE_TRACE("Swapchain Present Mode: {}", PresentModeToString(m_PresentMode));
 
 		PT_CORE_TRACE("Swapchain Created");
+
+		return SwapchainResult{ SwapchainStatus::Success };
 	}
 
-	void VulkanSwapchain::CreateImageViews()
+	VkResult VulkanSwapchain::CreateImageViews()
 	{
 		PT_CORE_TRACE("Creating Swapchain Image Views");
 
@@ -541,11 +573,13 @@ namespace Engine
 
 				DestroyImageViews();
 
-				return;
+				return l_Result;
 			}
 		}
 
 		PT_CORE_TRACE("Swapchain Image Views Created");
+
+		return VK_SUCCESS;
 	}
 
 	void VulkanSwapchain::DestroyImageViews()

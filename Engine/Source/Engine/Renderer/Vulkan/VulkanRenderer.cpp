@@ -7,6 +7,7 @@
 #include "Engine/Renderer/Vulkan/VulkanSwapchain.hpp"
 #include "Engine/Renderer/Vulkan/VulkanSynchronization.hpp"
 #include "Engine/Renderer/Vulkan/VulkanCommandPool.hpp"
+#include "Engine/Renderer/Vulkan/VulkanUtilities.hpp"
 #include "Engine/Core/Log.hpp"
 
 #include <volk.h>
@@ -50,6 +51,8 @@ namespace Engine
 		m_VulkanInstance->Initialize(window);
 		if (!m_VulkanInstance->IsInitialized())
 		{
+			Shutdown();
+
 			return;
 		}
 
@@ -57,6 +60,8 @@ namespace Engine
 		m_VulkanSurface->Initialize(*m_VulkanInstance, window);
 		if (!m_VulkanSurface->IsInitialized())
 		{
+			Shutdown();
+
 			return;
 		}
 
@@ -64,6 +69,8 @@ namespace Engine
 		m_VulkanDevice->Initialize(*m_VulkanInstance, *m_VulkanSurface);
 		if (!m_VulkanDevice->IsInitialized())
 		{
+			Shutdown();
+
 			return;
 		}
 
@@ -71,6 +78,8 @@ namespace Engine
 		m_VulkanMemoryAllocator->Initialize(*m_VulkanInstance, *m_VulkanDevice);
 		if (!m_VulkanMemoryAllocator->IsInitialized())
 		{
+			Shutdown();
+
 			return;
 		}
 
@@ -78,6 +87,8 @@ namespace Engine
 		m_VulkanSwapchain->Initialize(*m_VulkanDevice, *m_VulkanSurface, window);
 		if (!m_VulkanSwapchain->IsInitialized())
 		{
+			Shutdown();
+
 			return;
 		}
 
@@ -85,6 +96,8 @@ namespace Engine
 		m_VulkanSynchronization->Initialize(*m_VulkanDevice, *m_VulkanSwapchain);
 		if (!m_VulkanSynchronization->IsInitialized())
 		{
+			Shutdown();
+
 			return;
 		}
 
@@ -92,6 +105,8 @@ namespace Engine
 		m_VulkanCommandPool->Initialize(*m_VulkanDevice, static_cast<uint32_t>(VulkanSynchronization::k_MaxFramesInFlight));
 		if (!m_VulkanCommandPool->IsInitialized())
 		{
+			Shutdown();
+
 			return;
 		}
 
@@ -100,65 +115,164 @@ namespace Engine
 
 	bool VulkanRenderer::IsInitialized() const
 	{
-		const bool l_CoreReady = m_VulkanInstance && m_VulkanInstance->IsInitialized()
-			&& m_VulkanSurface && m_VulkanSurface->IsInitialized()
-			&& m_VulkanDevice && m_VulkanDevice->IsInitialized()
-			&& m_VulkanMemoryAllocator && m_VulkanMemoryAllocator->IsInitialized();
-
-		const bool l_FrameReady = m_VulkanSwapchain && m_VulkanSwapchain->IsInitialized()
-			&& m_VulkanSynchronization && m_VulkanSynchronization->IsInitialized()
-			&& m_VulkanCommandPool && m_VulkanCommandPool->IsInitialized();
+		const bool l_CoreReady = m_VulkanInstance && m_VulkanInstance->IsInitialized() && m_VulkanSurface && m_VulkanSurface->IsInitialized() && m_VulkanDevice && m_VulkanDevice->IsInitialized() && m_VulkanMemoryAllocator && m_VulkanMemoryAllocator->IsInitialized();
+		const bool l_FrameReady = m_VulkanSwapchain && m_VulkanSwapchain->IsInitialized() && m_VulkanSynchronization && m_VulkanSynchronization->IsInitialized() && m_VulkanCommandPool && m_VulkanCommandPool->IsInitialized();
 
 		return l_CoreReady && l_FrameReady;
 	}
 
-	bool VulkanRenderer::Render()
+	RenderOutcome VulkanRenderer::Render()
 	{
-		if (!IsInitialized())
+		if (m_Fatal || !IsInitialized())
 		{
-			return false;
+			return RenderOutcome::Fatal;
 		}
 
-		// Blocks until the frame that last used this slot has finished on the GPU, and rehooks semaphores after a swapchain recreate
-		if (!m_VulkanSynchronization->WaitForFrame())
+		FrameRecord l_Frame{};
+
+		// 1. Replace the swapchain before acquiring from it, so every acquire that still references the old one is retired first
+		if (m_VulkanSwapchain->NeedsRecreate())
 		{
-			return false;
+			const VkResult l_AcquireWaitResult = m_VulkanSynchronization->WaitForPendingAcquires();
+			if (l_AcquireWaitResult != VK_SUCCESS)
+			{
+				return FailFrame(l_Frame, "retiring outstanding acquires", l_AcquireWaitResult);
+			}
+
+			const SwapchainResult l_RecreateResult = m_VulkanSwapchain->Recreate();
+			switch (l_RecreateResult.Status)
+			{
+				case SwapchainStatus::Success:
+				{
+					break;
+				}
+				case SwapchainStatus::Deferred:
+				{
+					// Zero-sized framebuffer, nothing can be presented until the window has a size again
+					return RenderOutcome::Skipped;
+				}
+				default:
+				{
+					// Retrying a failed creation every frame is the sleep-and-retry loop this policy exists to prevent
+					return FailFrame(l_Frame, "recreating the swapchain", l_RecreateResult.Error);
+				}
+			}
 		}
 
-		uint32_t l_ImageIndex = 0;
-		if (!m_VulkanSwapchain->AcquireNextImage(m_VulkanSynchronization->GetImageAvailableSemaphore(), l_ImageIndex))
+		// 2. Rehook semaphores after a generation change, then wait for the slot's previous frame and its acquire
+		const VkResult l_WaitResult = m_VulkanSynchronization->WaitForFrame();
+		if (l_WaitResult != VK_SUCCESS)
 		{
-			// Swapchain was recreated or is not renderable, the next frame will rehook and retry
-			return false;
+			return FailFrame(l_Frame, "waiting for the frame slot", l_WaitResult);
 		}
 
-		const uint32_t l_FrameIndex = m_VulkanSynchronization->GetFrameIndex();
-		VkCommandBuffer l_CommandBuffer = m_VulkanCommandPool->GetCommandBuffer(l_FrameIndex);
+		// Captured before Submit advances the submitted frame count
+		l_Frame.FrameSlot = m_VulkanSynchronization->GetFrameIndex();
+		l_Frame.SwapchainGeneration = m_VulkanSwapchain->GetGeneration();
 
-		if (!m_VulkanCommandPool->Begin(l_FrameIndex))
+		// 3. Acquire
+		const SwapchainResult l_AcquireResult = m_VulkanSwapchain->AcquireNextImage(m_VulkanSynchronization->GetImageAvailableSemaphore(), m_VulkanSynchronization->GetAcquireFence(), l_Frame.ImageIndex);
+		switch (l_AcquireResult.Status)
 		{
-			m_VulkanSynchronization->RecoverAbandonedAcquire();
-
-			return false;
+			case SwapchainStatus::Success:
+			case SwapchainStatus::Suboptimal:
+			{
+				break;
+			}
+			case SwapchainStatus::Deferred:
+			case SwapchainStatus::OutOfDate:
+			{
+				// Nothing was acquired, the next Render() recreates and retries
+				return RenderOutcome::Skipped;
+			}
+			default:
+			{
+				return FailFrame(l_Frame, "acquiring a swapchain image", l_AcquireResult.Error);
+			}
 		}
 
-		RecordFrame(l_CommandBuffer, l_ImageIndex);
+		l_Frame.AcquireStage = FrameRecord::Stage::Acquired;
+		m_VulkanSynchronization->MarkAcquirePending();
 
-		if (!m_VulkanCommandPool->End(l_FrameIndex))
+		// 4. Record
+		VkCommandBuffer l_CommandBuffer = m_VulkanCommandPool->GetCommandBuffer(l_Frame.FrameSlot);
+
+		const VkResult l_BeginResult = m_VulkanCommandPool->Begin(l_Frame.FrameSlot);
+		if (l_BeginResult != VK_SUCCESS)
 		{
-			m_VulkanSynchronization->RecoverAbandonedAcquire();
-
-			return false;
+			return FailFrame(l_Frame, "beginning the command buffer", l_BeginResult);
 		}
 
-		if (!m_VulkanSynchronization->Submit(m_VulkanDevice->GetGraphicsQueue(), l_CommandBuffer, l_ImageIndex))
-		{
-			m_VulkanSynchronization->RecoverAbandonedAcquire();
+		RecordFrame(l_CommandBuffer, l_Frame.ImageIndex);
 
-			return false;
+		const VkResult l_EndResult = m_VulkanCommandPool->End(l_Frame.FrameSlot);
+		if (l_EndResult != VK_SUCCESS)
+		{
+			return FailFrame(l_Frame, "ending the command buffer", l_EndResult);
 		}
 
-		return m_VulkanSwapchain->Present(m_VulkanDevice->GetGraphicsQueue(), m_VulkanSynchronization->GetRenderFinishedSemaphore(l_ImageIndex), l_ImageIndex);
+		// 5. Submit, the frame only counts as in flight once the queue accepted it
+		const VkResult l_SubmitResult = m_VulkanSynchronization->Submit(m_VulkanDevice->GetGraphicsQueue(), l_CommandBuffer, l_Frame.ImageIndex, l_Frame.SubmittedTimelineValue);
+		if (l_SubmitResult != VK_SUCCESS)
+		{
+			return FailFrame(l_Frame, "submitting the command buffer", l_SubmitResult);
+		}
+
+		l_Frame.AcquireStage = FrameRecord::Stage::Submitted;
+
+		// 6. Present
+		const SwapchainResult l_PresentResult = m_VulkanSwapchain->Present(m_VulkanDevice->GetGraphicsQueue(), m_VulkanSynchronization->GetRenderFinishedSemaphore(l_Frame.ImageIndex), l_Frame.ImageIndex);
+		switch (l_PresentResult.Status)
+		{
+			case SwapchainStatus::Success:
+			case SwapchainStatus::Suboptimal:
+			{
+				l_Frame.AcquireStage = FrameRecord::Stage::Presented;
+
+				return RenderOutcome::Presented;
+			}
+			case SwapchainStatus::OutOfDate:
+			{
+				return RenderOutcome::Skipped;
+			}
+			default:
+			{
+				return FailFrame(l_Frame, "presenting the swapchain image", l_PresentResult.Error);
+			}
+		}
+	}
+
+	RenderOutcome VulkanRenderer::FailFrame(const FrameRecord& frame, const char* stage, VkResult result)
+	{
+		const char* l_AcquireStage = "none";
+		switch (frame.AcquireStage)
+		{
+			case FrameRecord::Stage::Acquired:
+			{
+				l_AcquireStage = "acquired, not submitted";
+				break;
+			}
+			case FrameRecord::Stage::Submitted:
+			{
+				l_AcquireStage = "submitted, not presented";
+				break;
+			}
+			case FrameRecord::Stage::Presented:
+			{
+				l_AcquireStage = "presented";
+				break;
+			}
+			default:
+			{
+				break;
+			}
+		}
+
+		PT_CORE_CRITICAL("Frame failed while {}: {} ({}), slot {}, image {}, swapchain generation {}, timeline value {}, acquire {}", stage, VulkanUtilities::ResultToString(result), VulkanUtilities::FailureKindToString(VulkanUtilities::ClassifyResult(result)), frame.FrameSlot, frame.ImageIndex, frame.SwapchainGeneration, frame.SubmittedTimelineValue, l_AcquireStage);
+
+		m_Fatal = true;
+
+		return RenderOutcome::Fatal;
 	}
 
 	void VulkanRenderer::RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex)
@@ -237,6 +351,11 @@ namespace Engine
 
 	void VulkanRenderer::Shutdown()
 	{
+		if (!m_VolkInitialized && !m_VulkanInstance)
+		{
+			return;
+		}
+
 		PT_CORE_INFO("------- SHUTTING DOWN VULKAN RENDERER -------");
 
 		if (m_VulkanSynchronization)
@@ -287,6 +406,8 @@ namespace Engine
 		}
 
 		ShutdownVolk();
+
+		m_Fatal = false;
 
 		PT_CORE_INFO("------- VULKAN RENDERER SHUTDOWN COMPLETE -------");
 	}

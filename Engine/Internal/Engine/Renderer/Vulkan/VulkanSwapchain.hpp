@@ -15,6 +15,22 @@ namespace Engine
 	class VulkanDevice;
 	class VulkanSurface;
 
+	// Outcome of a swapchain build, acquire, or present, Error carries the VkResult whenever Status is Failed
+	enum class SwapchainStatus : uint8_t
+	{
+		Success, // Built, acquired, or presented
+		Suboptimal, // Acquired or presented, and a recreate has been requested for the next frame
+		Deferred, // Nothing usable exists yet, the framebuffer is zero sized, retry later
+		OutOfDate, // The swapchain must be recreated before it can be used again, nothing was acquired or shown
+		Failed, // See Error, the renderer's policy decides whether this is terminal
+	};
+
+	struct SwapchainResult
+	{
+		SwapchainStatus Status = SwapchainStatus::Failed;
+		VkResult Error = VK_SUCCESS;
+	};
+
 	class VulkanSwapchain
 	{
 	public:
@@ -28,7 +44,7 @@ namespace Engine
 
 		void Initialize(const VulkanDevice& device, const VulkanSurface& surface, const Window& window);
 		void Shutdown();
-		void Recreate();
+		SwapchainResult Recreate();
 
 		bool IsInitialized() const { return m_Device != nullptr; }
 
@@ -36,8 +52,8 @@ namespace Engine
 		bool NeedsRecreate() const { return m_NeedsRecreate; }
 		bool IsRenderable() const;
 
-		bool AcquireNextImage(VkSemaphore imageAvailableSemaphore, uint32_t& imageIndex);
-		bool Present(VkQueue queue, VkSemaphore renderFinishedSemaphore, uint32_t imageIndex);
+		SwapchainResult AcquireNextImage(VkSemaphore imageAvailableSemaphore, VkFence acquireFence, uint32_t& imageIndex);
+		SwapchainResult Present(VkQueue queue, VkSemaphore renderFinishedSemaphore, uint32_t imageIndex);
 
 		void SetVerticalSync(bool enabled);
 		bool GetVerticalSync() const { return m_VerticalSync; }
@@ -55,8 +71,9 @@ namespace Engine
 		VkImageView GetImageView(uint32_t imageIndex) const;
 
 	private:
-		void CreateSwapchain();
-		void CreateImageViews();
+		SwapchainResult Build();
+		SwapchainResult CreateSwapchain();
+		VkResult CreateImageViews();
 		void DestroyImageViews();
 		void DestroySwapchain();
 

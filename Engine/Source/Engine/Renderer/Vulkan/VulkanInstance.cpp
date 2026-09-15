@@ -108,7 +108,7 @@ namespace Engine
 
 		PT_CORE_INFO("------- SHUTTING DOWN VULKAN INSTANCE -------");
 
-		if (m_DebugMessenger != VK_NULL_HANDLE)
+		if (m_DebugMessenger != VK_NULL_HANDLE && vkDestroyDebugUtilsMessengerEXT)
 		{
 			PT_CORE_TRACE("Destroying Debug Messenger");
 

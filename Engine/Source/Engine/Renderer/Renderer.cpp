@@ -22,10 +22,11 @@ namespace Engine
 
 		m_VulkanRenderer = std::make_unique<VulkanRenderer>();
 		m_VulkanRenderer->Initialize(window);
-
 		if (!m_VulkanRenderer->IsInitialized())
 		{
 			PT_CORE_ERROR("------- RENDERER INITIALIZATION FAILED -------");
+
+			Shutdown();
 
 			return;
 		}
@@ -40,22 +41,24 @@ namespace Engine
 
 	void Renderer::Shutdown()
 	{
+		if (!m_VulkanRenderer)
+		{
+			return;
+		}
+
 		PT_CORE_INFO("------- SHUTTING DOWN RENDERER -------");
 
-		if (m_VulkanRenderer)
-		{
-			m_VulkanRenderer->Shutdown();
-			m_VulkanRenderer.reset();
-		}
+		m_VulkanRenderer->Shutdown();
+		m_VulkanRenderer.reset();
 
 		PT_CORE_INFO("------- RENDERER SHUTDOWN COMPLETE -------");
 	}
 
-	bool Renderer::Render()
+	RenderOutcome Renderer::Render()
 	{
 		if (!m_VulkanRenderer)
 		{
-			return false;
+			return RenderOutcome::Fatal;
 		}
 
 		return m_VulkanRenderer->Render();

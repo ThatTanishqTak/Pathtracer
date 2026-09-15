@@ -30,6 +30,8 @@ namespace Engine
 		{
 			PT_CORE_CRITICAL("Failed to initialize platform, aborting startup");
 
+			Shutdown();
+
 			return;
 		}
 
@@ -45,10 +47,7 @@ namespace Engine
 		{
 			PT_CORE_CRITICAL("Failed to initialize window, aborting startup");
 
-			m_Window.reset();
-
-			m_Platform->Shutdown();
-			m_Platform.reset();
+			Shutdown();
 
 			return;
 		}
@@ -59,14 +58,7 @@ namespace Engine
 		{
 			PT_CORE_CRITICAL("Failed to initialize renderer, aborting startup");
 
-			m_Renderer->Shutdown();
-			m_Renderer.reset();
-			
-			m_Window->Shutdown();
-			m_Window.reset();
-
-			m_Platform->Shutdown();
-			m_Platform.reset();
+			Shutdown();
 
 			return;
 		}
@@ -78,8 +70,10 @@ namespace Engine
 
 	void Application::Shutdown()
 	{
-		if (!m_Initialized)
+		if (!m_Renderer && !m_Window && !m_Platform)
 		{
+			m_Initialized = false;
+
 			return;
 		}
 
@@ -136,8 +130,18 @@ namespace Engine
 				m_Renderer->OnFramebufferResized();
 			}
 
+			const RenderOutcome l_Outcome = m_Renderer->Render();
+
+			if (l_Outcome == RenderOutcome::Fatal)
+			{
+				// The renderer already logged the original reason, only a terminal outcome stops the loop, never a skipped frame
+				PT_CORE_CRITICAL("Renderer reported a fatal error, leaving the main loop");
+
+				break;
+			}
+
 			// Present paces the loop, only a skipped frame needs a small yield to avoid a busy spin
-			if (!m_Renderer->Render())
+			if (l_Outcome == RenderOutcome::Skipped)
 			{
 				std::this_thread::sleep_for(std::chrono::milliseconds(1));
 			}

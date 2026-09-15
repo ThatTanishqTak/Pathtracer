@@ -78,14 +78,14 @@ namespace Engine
 		PT_CORE_INFO("------- VULKAN COMMAND POOL SHUTDOWN COMPLETE -------");
 	}
 
-	bool VulkanCommandPool::Begin(uint32_t index)
+	VkResult VulkanCommandPool::Begin(uint32_t index)
 	{
 		VkCommandBuffer l_CommandBuffer = GetCommandBuffer(index);
 		if (l_CommandBuffer == VK_NULL_HANDLE)
 		{
 			PT_CORE_ERROR("Command buffer index {} is out of range for {} command buffer(s)", index, m_CommandBuffers.size());
 
-			return false;
+			return VK_ERROR_UNKNOWN;
 		}
 
 		VkResult l_Result = vkResetCommandBuffer(l_CommandBuffer, 0);
@@ -93,7 +93,7 @@ namespace Engine
 		{
 			PT_CORE_ERROR("Failed vkResetCommandBuffer: {}", VulkanUtilities::ResultToString(l_Result));
 
-			return false;
+			return l_Result;
 		}
 
 		VkCommandBufferBeginInfo l_BeginInfo
@@ -107,20 +107,20 @@ namespace Engine
 		{
 			PT_CORE_ERROR("Failed vkBeginCommandBuffer: {}", VulkanUtilities::ResultToString(l_Result));
 
-			return false;
+			return l_Result;
 		}
 
-		return true;
+		return VK_SUCCESS;
 	}
 
-	bool VulkanCommandPool::End(uint32_t index)
+	VkResult VulkanCommandPool::End(uint32_t index)
 	{
 		VkCommandBuffer l_CommandBuffer = GetCommandBuffer(index);
 		if (l_CommandBuffer == VK_NULL_HANDLE)
 		{
 			PT_CORE_ERROR("Command buffer index {} is out of range for {} command buffer(s)", index, m_CommandBuffers.size());
 
-			return false;
+			return VK_ERROR_UNKNOWN;
 		}
 
 		const VkResult l_Result = vkEndCommandBuffer(l_CommandBuffer);
@@ -128,10 +128,10 @@ namespace Engine
 		{
 			PT_CORE_ERROR("Failed vkEndCommandBuffer: {}", VulkanUtilities::ResultToString(l_Result));
 
-			return false;
+			return l_Result;
 		}
 
-		return true;
+		return VK_SUCCESS;
 	}
 
 	VkCommandBuffer VulkanCommandPool::GetCommandBuffer(uint32_t index) const

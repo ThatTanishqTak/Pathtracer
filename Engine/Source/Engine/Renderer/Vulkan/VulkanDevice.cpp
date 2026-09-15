@@ -222,7 +222,7 @@ namespace Engine
 		{
 			PT_CORE_TRACE("Destroying Logical Device");
 
-			vkDeviceWaitIdle(m_Device);
+			WaitIdle();
 
 			vkDestroyDevice(m_Device, nullptr);
 			m_Device = VK_NULL_HANDLE;
@@ -239,6 +239,22 @@ namespace Engine
 		PT_CORE_TRACE("Physical Device Released");
 
 		PT_CORE_INFO("------- VULKAN DEVICE SHUTDOWN COMPLETE -------");
+	}
+
+	VkResult VulkanDevice::WaitIdle() const
+	{
+		if (m_Device == VK_NULL_HANDLE)
+		{
+			return VK_ERROR_INITIALIZATION_FAILED;
+		}
+
+		const VkResult l_Result = vkDeviceWaitIdle(m_Device);
+		if (l_Result != VK_SUCCESS)
+		{
+			PT_CORE_ERROR("Failed vkDeviceWaitIdle: {}", VulkanUtilities::ResultToString(l_Result));
+		}
+
+		return l_Result;
 	}
 
 	void VulkanDevice::EnumeratePhysicalDevices(const VulkanInstance& instance, std::vector<VkPhysicalDevice>& devices)
@@ -371,7 +387,7 @@ namespace Engine
 		const VkResult l_Result = vkCreateDevice(m_PhysicalDevice, &l_DeviceCreateInfo, nullptr, &m_Device);
 		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_CRITICAL("Failed vkCreateDevice: {}", static_cast<int>(l_Result));
+			PT_CORE_CRITICAL("Failed vkCreateDevice: {}", VulkanUtilities::ResultToString(l_Result));
 
 			m_Device = VK_NULL_HANDLE;
 

@@ -40,16 +40,21 @@ namespace Engine
 		m_SubmittedFrameCount = 0;
 		m_SwapchainGeneration = swapchain.GetGeneration();
 
-		CreateTimelineSemaphore();
-		if (m_TimelineSemaphore == VK_NULL_HANDLE)
+		if (CreateTimelineSemaphore() != VK_SUCCESS)
 		{
 			Shutdown();
 
 			return;
 		}
 
-		CreateFrameSemaphores();
-		if (m_ImageAvailableSemaphores.empty())
+		if (CreateFrameSemaphores() != VK_SUCCESS)
+		{
+			Shutdown();
+
+			return;
+		}
+
+		if (CreateAcquireFences() != VK_SUCCESS)
 		{
 			Shutdown();
 
@@ -58,8 +63,7 @@ namespace Engine
 
 		if (swapchain.GetImageCount() > 0)
 		{
-			CreateImageSemaphores(swapchain.GetImageCount());
-			if (m_RenderFinishedSemaphores.empty())
+			if (CreateImageSemaphores(swapchain.GetImageCount()) != VK_SUCCESS)
 			{
 				Shutdown();
 
@@ -81,13 +85,20 @@ namespace Engine
 
 		PT_CORE_INFO("------- SHUTTING DOWN VULKAN SYNCHRONIZATION -------");
 
-		if (m_Device->IsInitialized())
+		VkResult l_Result = WaitForPendingAcquires();
+		if (l_Result == VK_SUCCESS)
 		{
-			vkDeviceWaitIdle(m_Device->GetHandle());
+			l_Result = m_Device->WaitIdle();
+		}
+
+		if (l_Result != VK_SUCCESS)
+		{
+			PT_CORE_ERROR("Destroying synchronization objects without a completion guarantee: {}", VulkanUtilities::ResultToString(l_Result));
 		}
 
 		DestroyImageSemaphores();
 		DestroyFrameSemaphores();
+		DestroyAcquireFences();
 		DestroyTimelineSemaphore();
 
 		m_SubmittedFrameCount = 0;
@@ -98,11 +109,11 @@ namespace Engine
 		PT_CORE_INFO("------- VULKAN SYNCHRONIZATION SHUTDOWN COMPLETE -------");
 	}
 
-	void VulkanSynchronization::RehookBinarySemaphores()
+	VkResult VulkanSynchronization::RehookBinarySemaphores()
 	{
 		if (m_Swapchain == nullptr || !m_Swapchain->IsInitialized())
 		{
-			return;
+			return VK_ERROR_INITIALIZATION_FAILED;
 		}
 
 		// Rehook on a swapchain generation change, or when an earlier recreate or recovery failed and left the sets empty or mismatched
@@ -110,74 +121,94 @@ namespace Engine
 		const bool l_SetsIncomplete = m_ImageAvailableSemaphores.empty() || m_RenderFinishedSemaphores.size() != m_Swapchain->GetImageCount();
 		if (!l_GenerationChanged && !l_SetsIncomplete)
 		{
-			return;
+			return VK_SUCCESS;
 		}
 
 		PT_CORE_TRACE("Rehooking Binary Semaphores");
 
-		vkDeviceWaitIdle(m_Device->GetHandle());
+		VkResult l_Result = WaitForPendingAcquires();
+		if (l_Result != VK_SUCCESS)
+		{
+			return l_Result;
+		}
+
+		l_Result = m_Device->WaitIdle();
+		if (l_Result != VK_SUCCESS)
+		{
+			return l_Result;
+		}
 
 		DestroyImageSemaphores();
 		DestroyFrameSemaphores();
 
-		CreateFrameSemaphores();
-		if (m_ImageAvailableSemaphores.empty())
+		l_Result = CreateFrameSemaphores();
+		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_ERROR("Failed to recreate frame semaphores, retrying next frame");
+			PT_CORE_ERROR("Failed to recreate frame semaphores");
 
-			return;
+			return l_Result;
 		}
 
-		CreateImageSemaphores(m_Swapchain->GetImageCount());
-		if (m_RenderFinishedSemaphores.empty())
+		l_Result = CreateImageSemaphores(m_Swapchain->GetImageCount());
+		if (l_Result != VK_SUCCESS)
 		{
-			PT_CORE_ERROR("Failed to recreate image semaphores, retrying next frame");
+			PT_CORE_ERROR("Failed to recreate image semaphores");
 
 			DestroyFrameSemaphores();
 
-			return;
+			return l_Result;
 		}
 
 		m_SwapchainGeneration = m_Swapchain->GetGeneration();
 
 		PT_CORE_TRACE("Binary Semaphores Rehooked");
+
+		return VK_SUCCESS;
 	}
 
-	bool VulkanSynchronization::WaitForFrame()
+	VkResult VulkanSynchronization::WaitForFrame()
 	{
 		if (!IsInitialized())
 		{
-			return false;
+			return VK_ERROR_INITIALIZATION_FAILED;
 		}
 
-		RehookBinarySemaphores();
-
-		if (m_ImageAvailableSemaphores.empty())
+		const VkResult l_RehookResult = RehookBinarySemaphores();
+		if (l_RehookResult != VK_SUCCESS)
 		{
-			return false;
+			return l_RehookResult;
 		}
 
-		if (m_SubmittedFrameCount < k_MaxFramesInFlight)
+		if (m_SubmittedFrameCount >= k_MaxFramesInFlight)
 		{
-			return true;
+			const VkResult l_TimelineResult = WaitForTimelineValue(m_SubmittedFrameCount + 1 - k_MaxFramesInFlight);
+			if (l_TimelineResult != VK_SUCCESS)
+			{
+				return l_TimelineResult;
+			}
 		}
 
-		return WaitForTimelineValue(m_SubmittedFrameCount + 1 - k_MaxFramesInFlight);
+		// The slot's acquire semaphore and fence are about to be reused, establish that their previous acquire completed
+		return WaitForAcquire(GetFrameIndex());
 	}
 
-	bool VulkanSynchronization::Submit(VkQueue queue, VkCommandBuffer commandBuffer, uint32_t imageIndex)
+	VkResult VulkanSynchronization::Submit(VkQueue queue, VkCommandBuffer commandBuffer, uint32_t imageIndex, uint64_t& submittedValue)
 	{
+		submittedValue = 0;
+
 		if (!IsInitialized())
 		{
-			return false;
+			return VK_ERROR_INITIALIZATION_FAILED;
 		}
 
 		if (imageIndex >= m_RenderFinishedSemaphores.size())
 		{
 			PT_CORE_ERROR("Swapchain image index {} is out of range for {} render finished semaphore(s)", imageIndex, m_RenderFinishedSemaphores.size());
 
-			return false;
+			return VK_ERROR_UNKNOWN;
 		}
+
+		const uint64_t l_SignalValue = m_SubmittedFrameCount + 1;
 
 		VkSemaphoreSubmitInfo l_WaitSemaphoreInfo
 		{
@@ -198,7 +229,7 @@ namespace Engine
 			{
 				.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 				.semaphore = m_TimelineSemaphore,
-				.value = m_SubmittedFrameCount + 1,
+				.value = l_SignalValue,
 				.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 			},
 		};
@@ -225,47 +256,52 @@ namespace Engine
 		{
 			PT_CORE_ERROR("Failed vkQueueSubmit2: {}", VulkanUtilities::ResultToString(l_Result));
 
-			return false;
+			return l_Result;
 		}
 
-		m_SubmittedFrameCount++;
+		// Only counted as in flight once the queue accepted the work
+		m_SubmittedFrameCount = l_SignalValue;
+		submittedValue = l_SignalValue;
 
-		return true;
+		return VK_SUCCESS;
 	}
 
-	void VulkanSynchronization::WaitForAllFrames()
+	VkResult VulkanSynchronization::WaitForAllFrames()
 	{
-		if (!IsInitialized() || m_SubmittedFrameCount == 0)
+		if (!IsInitialized())
 		{
-			return;
+			return VK_ERROR_INITIALIZATION_FAILED;
 		}
 
-		WaitForTimelineValue(m_SubmittedFrameCount);
+		if (m_SubmittedFrameCount == 0)
+		{
+			return VK_SUCCESS;
+		}
+
+		return WaitForTimelineValue(m_SubmittedFrameCount);
 	}
 
-	void VulkanSynchronization::RecoverAbandonedAcquire()
+	void VulkanSynchronization::MarkAcquirePending()
 	{
-		if (!IsInitialized() || m_ImageAvailableSemaphores.empty())
+		const uint32_t l_FrameSlot = GetFrameIndex();
+		if (l_FrameSlot < m_AcquireFencePending.size())
 		{
-			return;
+			m_AcquireFencePending[l_FrameSlot] = true;
+		}
+	}
+
+	VkResult VulkanSynchronization::WaitForPendingAcquires()
+	{
+		for (uint32_t i = 0; i < m_AcquireFences.size(); i++)
+		{
+			const VkResult l_Result = WaitForAcquire(i);
+			if (l_Result != VK_SUCCESS)
+			{
+				return l_Result;
+			}
 		}
 
-		vkDeviceWaitIdle(m_Device->GetHandle());
-
-		const uint32_t l_FrameIndex = GetFrameIndex();
-
-		vkDestroySemaphore(m_Device->GetHandle(), m_ImageAvailableSemaphores[l_FrameIndex], nullptr);
-		m_ImageAvailableSemaphores[l_FrameIndex] = VK_NULL_HANDLE;
-
-		VkSemaphoreCreateInfo l_SemaphoreCreateInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-
-		const VkResult l_Result = vkCreateSemaphore(m_Device->GetHandle(), &l_SemaphoreCreateInfo, nullptr, &m_ImageAvailableSemaphores[l_FrameIndex]);
-		if (l_Result != VK_SUCCESS)
-		{
-			PT_CORE_ERROR("Failed to recreate image available semaphore: {}", VulkanUtilities::ResultToString(l_Result));
-
-			DestroyFrameSemaphores();
-		}
+		return VK_SUCCESS;
 	}
 
 	VkSemaphore VulkanSynchronization::GetImageAvailableSemaphore() const
@@ -278,6 +314,16 @@ namespace Engine
 		return m_ImageAvailableSemaphores[GetFrameIndex()];
 	}
 
+	VkFence VulkanSynchronization::GetAcquireFence() const
+	{
+		if (m_AcquireFences.empty())
+		{
+			return VK_NULL_HANDLE;
+		}
+
+		return m_AcquireFences[GetFrameIndex()];
+	}
+
 	VkSemaphore VulkanSynchronization::GetRenderFinishedSemaphore(uint32_t imageIndex) const
 	{
 		if (imageIndex >= m_RenderFinishedSemaphores.size())
@@ -288,7 +334,7 @@ namespace Engine
 		return m_RenderFinishedSemaphores[imageIndex];
 	}
 
-	void VulkanSynchronization::CreateTimelineSemaphore()
+	VkResult VulkanSynchronization::CreateTimelineSemaphore()
 	{
 		PT_CORE_TRACE("Creating Timeline Semaphore");
 
@@ -312,13 +358,15 @@ namespace Engine
 
 			m_TimelineSemaphore = VK_NULL_HANDLE;
 
-			return;
+			return l_Result;
 		}
 
 		PT_CORE_TRACE("Timeline Semaphore Created");
+
+		return VK_SUCCESS;
 	}
 
-	void VulkanSynchronization::CreateFrameSemaphores()
+	VkResult VulkanSynchronization::CreateFrameSemaphores()
 	{
 		PT_CORE_TRACE("Creating Image Available Semaphores");
 
@@ -335,14 +383,44 @@ namespace Engine
 
 				DestroyFrameSemaphores();
 
-				return;
+				return l_Result;
 			}
 		}
 
 		PT_CORE_TRACE("Image Available Semaphores Created: {}", m_ImageAvailableSemaphores.size());
+
+		return VK_SUCCESS;
 	}
 
-	void VulkanSynchronization::CreateImageSemaphores(uint32_t swapchainImageCount)
+	VkResult VulkanSynchronization::CreateAcquireFences()
+	{
+		PT_CORE_TRACE("Creating Acquire Fences");
+
+		m_AcquireFences.resize(k_MaxFramesInFlight, VK_NULL_HANDLE);
+		m_AcquireFencePending.assign(k_MaxFramesInFlight, false);
+
+		// Unsignaled, vkAcquireNextImageKHR requires it and WaitForAcquire resets it after every use
+		VkFenceCreateInfo l_FenceCreateInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+
+		for (size_t i = 0; i < m_AcquireFences.size(); i++)
+		{
+			const VkResult l_Result = vkCreateFence(m_Device->GetHandle(), &l_FenceCreateInfo, nullptr, &m_AcquireFences[i]);
+			if (l_Result != VK_SUCCESS)
+			{
+				PT_CORE_CRITICAL("Failed vkCreateFence for acquire fence {}: {}", i, VulkanUtilities::ResultToString(l_Result));
+
+				DestroyAcquireFences();
+
+				return l_Result;
+			}
+		}
+
+		PT_CORE_TRACE("Acquire Fences Created: {}", m_AcquireFences.size());
+
+		return VK_SUCCESS;
+	}
+
+	VkResult VulkanSynchronization::CreateImageSemaphores(uint32_t swapchainImageCount)
 	{
 		PT_CORE_TRACE("Creating Render Finished Semaphores");
 
@@ -359,11 +437,13 @@ namespace Engine
 
 				DestroyImageSemaphores();
 
-				return;
+				return l_Result;
 			}
 		}
 
 		PT_CORE_TRACE("Render Finished Semaphores Created: {}", m_RenderFinishedSemaphores.size());
+
+		return VK_SUCCESS;
 	}
 
 	void VulkanSynchronization::DestroyImageSemaphores()
@@ -402,6 +482,25 @@ namespace Engine
 		m_ImageAvailableSemaphores.clear();
 	}
 
+	void VulkanSynchronization::DestroyAcquireFences()
+	{
+		if (m_AcquireFences.empty())
+		{
+			return;
+		}
+
+		for (VkFence l_Fence : m_AcquireFences)
+		{
+			if (l_Fence != VK_NULL_HANDLE)
+			{
+				vkDestroyFence(m_Device->GetHandle(), l_Fence, nullptr);
+			}
+		}
+
+		m_AcquireFences.clear();
+		m_AcquireFencePending.clear();
+	}
+
 	void VulkanSynchronization::DestroyTimelineSemaphore()
 	{
 		if (m_TimelineSemaphore == VK_NULL_HANDLE)
@@ -417,7 +516,37 @@ namespace Engine
 		PT_CORE_TRACE("Timeline Semaphore Destroyed");
 	}
 
-	bool VulkanSynchronization::WaitForTimelineValue(uint64_t value)
+	VkResult VulkanSynchronization::WaitForAcquire(uint32_t frameSlot)
+	{
+		if (frameSlot >= m_AcquireFences.size() || !m_AcquireFencePending[frameSlot])
+		{
+			return VK_SUCCESS;
+		}
+
+		// The presentation engine signals this fence when it releases the image, whether or not the image is ever presented
+		VkResult l_Result = vkWaitForFences(m_Device->GetHandle(), 1, &m_AcquireFences[frameSlot], VK_TRUE, UINT64_MAX);
+		if (l_Result != VK_SUCCESS)
+		{
+			PT_CORE_ERROR("Failed vkWaitForFences for acquire fence {}: {}", frameSlot, VulkanUtilities::ResultToString(l_Result));
+
+			return l_Result;
+		}
+
+		// Fence rules: reset only after the wait established it is signaled and nothing else is pending on it
+		l_Result = vkResetFences(m_Device->GetHandle(), 1, &m_AcquireFences[frameSlot]);
+		if (l_Result != VK_SUCCESS)
+		{
+			PT_CORE_ERROR("Failed vkResetFences for acquire fence {}: {}", frameSlot, VulkanUtilities::ResultToString(l_Result));
+
+			return l_Result;
+		}
+
+		m_AcquireFencePending[frameSlot] = false;
+
+		return VK_SUCCESS;
+	}
+
+	VkResult VulkanSynchronization::WaitForTimelineValue(uint64_t value)
 	{
 		VkSemaphoreWaitInfo l_WaitInfo
 		{
@@ -432,9 +561,9 @@ namespace Engine
 		{
 			PT_CORE_ERROR("Failed vkWaitSemaphores for timeline value {}: {}", value, VulkanUtilities::ResultToString(l_Result));
 
-			return false;
+			return l_Result;
 		}
 
-		return true;
+		return VK_SUCCESS;
 	}
 }

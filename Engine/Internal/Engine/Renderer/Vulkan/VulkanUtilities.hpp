@@ -6,6 +6,7 @@
 
 #include <volk.h>
 
+#include <cstdint>
 #include <cstring>
 #include <vector>
 
@@ -29,9 +30,18 @@ namespace Engine
 					break;
 				}
 
+				// A successful zero count is a valid empty result, a fill call with a null data pointer would only be another count query
+				if (l_Count == 0)
+				{
+					out.clear();
+
+					return VK_SUCCESS;
+				}
+
 				out.resize(l_Count);
 				l_Result = enumerate(&l_Count, out.data());
-			} while (l_Result == VK_INCOMPLETE);
+			}
+			while (l_Result == VK_INCOMPLETE);
 
 			if (l_Result != VK_SUCCESS)
 			{
@@ -44,6 +54,83 @@ namespace Engine
 			out.resize(l_Count);
 
 			return VK_SUCCESS;
+		}
+
+		// The distinctions the renderer's recovery policy cares about, only OutOfDate is recoverable in the first version
+		enum class FailureKind : uint8_t
+		{
+			None,
+			OutOfDate,
+			SurfaceLost,
+			DeviceLost,
+			OutOfMemory,
+			Other,
+		};
+
+		inline FailureKind ClassifyResult(VkResult result)
+		{
+			switch (result)
+			{
+				case VK_SUCCESS:
+				case VK_SUBOPTIMAL_KHR:
+				{
+					return FailureKind::None;
+				}
+				case VK_ERROR_OUT_OF_DATE_KHR:
+				{
+					return FailureKind::OutOfDate;
+				}
+				case VK_ERROR_SURFACE_LOST_KHR:
+				case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT:
+				{
+					return FailureKind::SurfaceLost;
+				}
+				case VK_ERROR_DEVICE_LOST:
+				{
+					return FailureKind::DeviceLost;
+				}
+				case VK_ERROR_OUT_OF_HOST_MEMORY:
+				case VK_ERROR_OUT_OF_DEVICE_MEMORY:
+				case VK_ERROR_OUT_OF_POOL_MEMORY:
+				{
+					return FailureKind::OutOfMemory;
+				}
+				default:
+				{
+					return FailureKind::Other;
+				}
+			}
+		}
+
+		inline const char* FailureKindToString(FailureKind kind)
+		{
+			switch (kind)
+			{
+				case FailureKind::None:
+				{
+					return "none";
+				}
+				case FailureKind::OutOfDate:
+				{
+					return "out of date";
+				}
+				case FailureKind::SurfaceLost:
+				{
+					return "surface lost";
+				}
+				case FailureKind::DeviceLost:
+				{
+					return "device lost";
+				}
+				case FailureKind::OutOfMemory:
+				{
+					return "allocation failure";
+				}
+				default:
+				{
+					return "other";
+				}
+			}
 		}
 
 		inline bool IsExtensionSupported(const std::vector<VkExtensionProperties>& available, const char* name)
