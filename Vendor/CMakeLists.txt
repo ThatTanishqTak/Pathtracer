@@ -41,7 +41,25 @@ add_subdirectory(spdlog SYSTEM)
 # --------------
 
 # Vulkan --------------
-find_package(Vulkan REQUIRED GLOBAL)
+find_package(Vulkan 1.4 REQUIRED GLOBAL)
+find_program(Vulkan_SLANGC_EXECUTABLE NAMES slangc
+    HINTS
+        "$ENV{VULKAN_SDK}/bin"
+        "$ENV{VULKAN_SDK}/Bin"
+        "${Vulkan_INCLUDE_DIR}/../bin"
+        "${Vulkan_INCLUDE_DIR}/../Bin"
+    DOC "Slang compiler shipped with the Vulkan SDK"
+)
+mark_as_advanced(Vulkan_SLANGC_EXECUTABLE)
+
+if(NOT Vulkan_SLANGC_EXECUTABLE)
+    message(FATAL_ERROR "slangc was not found. Install a Vulkan 1.4 SDK that bundles Slang and make sure VULKAN_SDK points at it, or set Vulkan_SLANGC_EXECUTABLE to the slangc binary.")
+endif()
+
+add_executable(Vulkan::slangc IMPORTED GLOBAL)
+set_property(TARGET Vulkan::slangc PROPERTY IMPORTED_LOCATION "${Vulkan_SLANGC_EXECUTABLE}")
+
+message(STATUS "Found slangc: ${Vulkan_SLANGC_EXECUTABLE}")
 
 # volk: runtime Vulkan function loader
 set(VOLK_PULL_IN_VULKAN ON)

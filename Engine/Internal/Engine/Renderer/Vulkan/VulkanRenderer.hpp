@@ -5,9 +5,11 @@
 #endif
 
 #include "Engine/Renderer/Renderer.hpp"
+#include "Engine/Renderer/Vulkan/VulkanSynchronization.hpp"
 
 #include <volk.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 
@@ -19,8 +21,10 @@ namespace Engine
 	class VulkanDevice;
 	class VulkanMemoryAllocator;
 	class VulkanSwapchain;
-	class VulkanSynchronization;
 	class VulkanCommandPool;
+	class VulkanBuffer;
+	class VulkanImage;
+	class VulkanComputePipeline;
 
 	class VulkanRenderer
 	{
@@ -60,12 +64,21 @@ namespace Engine
 			Stage AcquireStage = Stage::None;
 		};
 
+		struct FrameResources
+		{
+			std::unique_ptr<VulkanBuffer> GradientParameters;
+			uint64_t SubmittedTimelineValue = 0;
+		};
+
 		void InitializeVolk();
 		void ShutdownVolk();
 
-		void RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderRequest& request);
+		VkResult CreateGradientResources();
+		VkResult CreateGradientImage();
+		void DestroyGradientResources();
 
-		// Logs the original reason and enters the terminal state, every later Render() returns Fatal until Shutdown
+		VkResult RecordFrame(VkCommandBuffer commandBuffer, uint32_t frameSlot, uint32_t imageIndex, const RenderRequest& request);
+
 		RenderOutcome FailFrame(const FrameRecord& frame, const char* stage, VkResult result);
 
 	private:
@@ -76,6 +89,9 @@ namespace Engine
 		std::unique_ptr<VulkanSwapchain> m_VulkanSwapchain;
 		std::unique_ptr<VulkanSynchronization> m_VulkanSynchronization;
 		std::unique_ptr<VulkanCommandPool> m_VulkanCommandPool;
+		std::unique_ptr<VulkanComputePipeline> m_GradientPipeline;
+		std::unique_ptr<VulkanImage> m_GradientImage;
+		std::array<FrameResources, VulkanSynchronization::k_MaxFramesInFlight> m_FrameResources;
 
 		bool m_VolkInitialized = false;
 		bool m_Fatal = false;

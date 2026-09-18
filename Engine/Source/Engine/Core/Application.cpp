@@ -185,7 +185,7 @@ namespace Engine
 
 		FrameTime l_FrameTime;
 
-		while (true)
+		while (m_ClientStarted)
 		{
 			// 1. Edges, deltas and wheel movement only live for one iteration
 			m_Input.ResetTransient();

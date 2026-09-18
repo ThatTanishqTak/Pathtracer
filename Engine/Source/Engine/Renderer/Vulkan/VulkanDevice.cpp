@@ -24,6 +24,9 @@ namespace Engine
 			return VulkanUtilities::IsExtensionSupported(l_Available, name);
 		}
 
+		// One queue family serves graphics, compute and present, the single-queue decision from the plan
+		constexpr VkQueueFlags k_RequiredQueueFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+
 		bool FindGraphicsQueueFamily(VkPhysicalDevice device, VkSurfaceKHR surface, uint32_t& index)
 		{
 			uint32_t l_QueueFamilyCount = 0;
@@ -34,7 +37,7 @@ namespace Engine
 
 			for (uint32_t i = 0; i < l_QueueFamilyCount; i++)
 			{
-				if (!(l_QueueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
+				if ((l_QueueFamilies[i].queueFlags & k_RequiredQueueFlags) != k_RequiredQueueFlags)
 				{
 					continue;
 				}
@@ -324,7 +327,7 @@ namespace Engine
 		m_GraphicsQueueFamilyIndex = l_BestGraphicsQueueFamilyIndex;
 
 		PT_CORE_INFO("Selected GPU: {} ({})", l_BestProperties.deviceName, DeviceTypeToString(l_BestProperties.deviceType));
-		PT_CORE_TRACE("Graphics Queue Family Index: {}", m_GraphicsQueueFamilyIndex);
+		PT_CORE_TRACE("Graphics/Compute/Present Queue Family Index: {}", m_GraphicsQueueFamilyIndex);
 	}
 
 	void VulkanDevice::CreateLogicalDevice()

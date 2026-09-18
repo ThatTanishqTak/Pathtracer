@@ -1,5 +1,8 @@
 #include "Sandbox/SandboxClient.hpp"
 
+#include <cmath>
+#include <numbers>
+
 namespace Sandbox
 {
 	void SandboxClient::OnStart(Engine::ApplicationServices& services)
@@ -7,12 +10,12 @@ namespace Sandbox
 		m_Services = &services;
 
 		PT_APP_INFO("Sandbox client started, {}x{} window", m_Services->GetWindowWidth(), m_Services->GetWindowHeight());
-		PT_APP_INFO("Controls: Space cycles the clear color, Tab toggles mouse capture, Escape closes");
+		PT_APP_INFO("Controls: Space cycles the gradient tint, P pauses the gradient, Tab toggles mouse capture, Escape closes");
 	}
 
 	void SandboxClient::OnStop() noexcept
 	{
-		PT_APP_INFO("Sandbox client stopped");
+		PT_APP_TRACE("Sandbox client stopped");
 
 		m_Services = nullptr;
 	}
@@ -68,20 +71,33 @@ namespace Sandbox
 		{
 			m_ClearColorIndex = (m_ClearColorIndex + 1) % k_ClearColors.size();
 
-			PT_APP_INFO("Clear color {}", m_ClearColorIndex);
+			PT_APP_INFO("Gradient tint {}", m_ClearColorIndex);
+		}
+
+		if (input.WasKeyPressed(Engine::Key::P))
+		{
+			m_GradientPaused = !m_GradientPaused;
+
+			PT_APP_INFO("Gradient {}", m_GradientPaused ? "paused" : "running");
 		}
 
 		if (input.WasKeyPressed(Engine::Key::Tab))
 		{
 			m_Services->SetMouseCaptured(!m_Services->IsMouseCaptured());
 
-			PT_APP_INFO("Mouse capture {}", m_Services->IsMouseCaptured() ? "on" : "off");
+			PT_APP_TRACE("Mouse capture {}", m_Services->IsMouseCaptured() ? "on" : "off");
 		}
 
 		// Held state only reads while the window has focus, which the host guarantees by clearing it on focus loss
 		if (input.IsKeyDown(Engine::Key::W) || input.IsKeyDown(Engine::Key::A) || input.IsKeyDown(Engine::Key::S) || input.IsKeyDown(Engine::Key::D))
 		{
 			PT_APP_TRACE("Movement keys held for {:.4f}s", time.DeltaSeconds);
+		}
+
+		// The clamped simulation step drives the phase, so a long stall moves the gradient by at most one clamped step
+		if (!m_GradientPaused)
+		{
+			m_GradientPhase = std::fmod(m_GradientPhase + k_GradientSpeed * time.DeltaSeconds, 2.0f * std::numbers::pi_v<float>);
 		}
 
 		m_StatisticsElapsed += time.ElapsedSeconds;
@@ -93,7 +109,7 @@ namespace Sandbox
 		{
 			const float l_AverageMilliseconds = (m_StatisticsElapsed / static_cast<float>(m_StatisticsFrames)) * 1000.0f;
 
-			PT_APP_TRACE("Frame {}: {} frames in {:.2f}s, {:.2f} ms average, focus {}, capture {}, mouse delta ({:.1f}, {:.1f})", time.FrameIndex, m_StatisticsFrames, m_StatisticsElapsed, l_AverageMilliseconds, input.HasFocus, input.MouseCaptured, m_StatisticsMouseDeltaX, m_StatisticsMouseDeltaY);
+			PT_APP_TRACE("Frame {}: {} frames in {:.2f}s, {:.2f} ms average, focus {}, capture {}, mouse delta ({:.1f}, {:.1f}), gradient phase {:.2f}", time.FrameIndex, m_StatisticsFrames, m_StatisticsElapsed, l_AverageMilliseconds, input.HasFocus, input.MouseCaptured, m_StatisticsMouseDeltaX, m_StatisticsMouseDeltaY, m_GradientPhase);
 
 			m_StatisticsElapsed = 0.0f;
 			m_StatisticsFrames = 0;
@@ -106,6 +122,7 @@ namespace Sandbox
 	{
 		Engine::RenderRequest l_Request;
 		l_Request.ClearColor = k_ClearColors[m_ClearColorIndex];
+		l_Request.GradientPhase = m_GradientPhase;
 
 		return l_Request;
 	}

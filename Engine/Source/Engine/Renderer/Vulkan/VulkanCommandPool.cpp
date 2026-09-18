@@ -64,9 +64,14 @@ namespace Engine
 
 		PT_CORE_INFO("------- SHUTTING DOWN VULKAN COMMAND POOL -------");
 
+		// Checked wait, a lost device is logged instead
 		if (m_Device->IsInitialized())
 		{
-			vkDeviceWaitIdle(m_Device->GetHandle());
+			const VkResult l_Result = m_Device->WaitIdle();
+			if (l_Result != VK_SUCCESS)
+			{
+				PT_CORE_ERROR("Destroying the command pool without a completion guarantee: {}", VulkanUtilities::ResultToString(l_Result));
+			}
 		}
 
 		// Destroying the pool frees every buffer allocated from it

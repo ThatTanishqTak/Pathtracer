@@ -27,8 +27,11 @@ namespace Sandbox
 			{ 0.05f, 0.05f, 0.25f, 1.0f },
 		} };
 
-		size_t m_ClearColorIndex = 0;
+		static constexpr float k_GradientSpeed = 1.5f;
 
+		size_t m_ClearColorIndex = 0;
+		float m_GradientPhase = 0.0f;
+		bool m_GradientPaused = false;
 		float m_StatisticsElapsed = 0.0f;
 		uint32_t m_StatisticsFrames = 0;
 		float m_StatisticsMouseDeltaX = 0.0f;

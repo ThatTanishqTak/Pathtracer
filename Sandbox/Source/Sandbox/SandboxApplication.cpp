@@ -13,8 +13,8 @@ namespace Engine
 
 		ApplicationSpecification l_Specification;
 		l_Specification.Name = "Pathtracer";
-		l_Specification.WindowWidth = 1920;
-		l_Specification.WindowHeight = 1080;
+		l_Specification.WindowWidth = 1080;
+		l_Specification.WindowHeight = 720;
 		l_Specification.WindowResizable = true;
 
 		PT_APP_TRACE("Window Title: {}", l_Specification.Name);

@@ -19,6 +19,15 @@ file(GLOB_RECURSE INTERNALS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/Internal/*.hpp"
 )
 
+# Collect the Slang sources
+file(GLOB SHADER_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.slang"
+)
+
+file(GLOB_RECURSE SHADER_MODULES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/Modules/*.slang"
+)
+
 # Create the static library
 add_library(${TARGET_NAME} STATIC ${SOURCES} ${HEADERS} ${INTERNALS})
 
@@ -26,6 +35,32 @@ add_library(${TARGET_NAME} STATIC ${SOURCES} ${HEADERS} ${INTERNALS})
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Source"   PREFIX "Source"   FILES ${SOURCES})
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Include"  PREFIX "Include"  FILES ${HEADERS})
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Internal" PREFIX "Internal" FILES ${INTERNALS})
+
+# Shader compilation --------------
+set(SHADER_OUTPUT_DIRECTORY "${OUTPUT_BASE}/Shaders")
+set(SHADER_BINARIES)
+
+foreach(SHADER_SOURCE IN LISTS SHADER_SOURCES)
+    get_filename_component(SHADER_NAME "${SHADER_SOURCE}" NAME)
+    set(SHADER_BINARY "${SHADER_OUTPUT_DIRECTORY}/${SHADER_NAME}.spv")
+
+    add_custom_command(OUTPUT "${SHADER_BINARY}" COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_OUTPUT_DIRECTORY}"
+        COMMAND Vulkan::slangc -target spirv -profile spirv_1_6 -emit-spirv-directly -fvk-use-entrypoint-name $<IF:$<CONFIG:Debug>,-g2,-O2> -I "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/Modules" -depfile "${SHADER_BINARY}.d" -o "${SHADER_BINARY}" "${SHADER_SOURCE}"
+        DEPENDS "${SHADER_SOURCE}" ${SHADER_MODULES}
+        DEPFILE "${SHADER_BINARY}.d"
+        COMMENT "Compiling shader ${SHADER_NAME}"
+        VERBATIM
+    )
+
+    list(APPEND SHADER_BINARIES "${SHADER_BINARY}")
+endforeach()
+
+# Every target that links Engine builds the shaders, so Sandbox and later Editor both get them
+add_custom_target(${TARGET_NAME}Shaders DEPENDS ${SHADER_BINARIES} SOURCES ${SHADER_SOURCES} ${SHADER_MODULES})
+add_dependencies(${TARGET_NAME} ${TARGET_NAME}Shaders)
+
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Shaders" PREFIX "Shaders" FILES ${SHADER_SOURCES} ${SHADER_MODULES})
+# --------------
 
 # Include directories, only Include is visible to sandbox
 target_include_directories(${TARGET_NAME}

@@ -40,21 +40,7 @@ namespace Engine
 		m_SubmittedFrameCount = 0;
 		m_SwapchainGeneration = swapchain.GetGeneration();
 
-		if (CreateTimelineSemaphore() != VK_SUCCESS)
-		{
-			Shutdown();
-
-			return;
-		}
-
-		if (CreateFrameSemaphores() != VK_SUCCESS)
-		{
-			Shutdown();
-
-			return;
-		}
-
-		if (CreateAcquireFences() != VK_SUCCESS)
+		if (CreateTimelineSemaphore() != VK_SUCCESS || CreateAcquireFences() != VK_SUCCESS || CreateFrameSemaphores() != VK_SUCCESS)
 		{
 			Shutdown();
 
