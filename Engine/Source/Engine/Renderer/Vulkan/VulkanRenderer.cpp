@@ -26,10 +26,15 @@ namespace Engine
 	namespace
 	{
 		constexpr VkFormat k_GradientImageFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
-		constexpr VkImageUsageFlags k_GradientImageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+		constexpr VkImageUsageFlags k_GradientImageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 		constexpr uint32_t k_GradientWorkgroupSize = 8;
 		constexpr const char* k_GradientShaderFile = "Gradient.slang.spv";
 		constexpr const char* k_GradientEntryPoint = "computeMain";
+
+		constexpr uint32_t k_ToneMapWorkgroupSize = 8;
+		constexpr const char* k_ToneMapShaderFile = "ToneMap.slang.spv";
+		constexpr const char* k_ToneMapEntryPoint = "computeMain";
 
 		// Must match GradientParameters in Gradient.slang, std140 layout: float4 at 0, uint2 at 16, float at 24, float at 28
 		struct GradientParameters
@@ -47,6 +52,21 @@ namespace Engine
 		static_assert(offsetof(GradientParameters, Height) == 20, "Extent.y must sit at std140 offset 20");
 		static_assert(offsetof(GradientParameters, Phase) == 24, "Phase must sit at std140 offset 24");
 		static_assert(offsetof(GradientParameters, Padding) == 28, "Padding must sit at std140 offset 28");
+
+		// Must match ToneMapParameters in ToneMap.slang, std430 push constant layout: uint2 at 0, float at 8, float at 12
+		struct ToneMapParameters
+		{
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			float Exposure = 1.0f;
+			float Padding = 0.0f;
+		};
+
+		static_assert(sizeof(ToneMapParameters) == 16, "ToneMapParameters must match the 16 byte push constant block in ToneMap.slang");
+		static_assert(offsetof(ToneMapParameters, Width) == 0, "Extent.x must sit at std430 offset 0");
+		static_assert(offsetof(ToneMapParameters, Height) == 4, "Extent.y must sit at std430 offset 4");
+		static_assert(offsetof(ToneMapParameters, Exposure) == 8, "Exposure must sit at std430 offset 8");
+		static_assert(offsetof(ToneMapParameters, Padding) == 12, "Padding must sit at std430 offset 12");
 
 		constexpr uint32_t DivideRoundingUp(uint32_t value, uint32_t divisor)
 		{
@@ -151,6 +171,15 @@ namespace Engine
 			return;
 		}
 
+		if (CreateToneMapResources() != VK_SUCCESS)
+		{
+			PT_CORE_CRITICAL("Failed to create the tone map resources");
+
+			Shutdown();
+
+			return;
+		}
+
 		PT_CORE_INFO("------- VULKAN RENDERER INITIALIZED -------");
 	}
 
@@ -159,8 +188,9 @@ namespace Engine
 		const bool l_CoreReady = m_VulkanInstance && m_VulkanInstance->IsInitialized() && m_VulkanSurface && m_VulkanSurface->IsInitialized() && m_VulkanDevice && m_VulkanDevice->IsInitialized() && m_VulkanMemoryAllocator && m_VulkanMemoryAllocator->IsInitialized();
 		const bool l_FrameReady = m_VulkanSwapchain && m_VulkanSwapchain->IsInitialized() && m_VulkanSynchronization && m_VulkanSynchronization->IsInitialized() && m_VulkanCommandPool && m_VulkanCommandPool->IsInitialized();
 		const bool l_GradientReady = m_GradientPipeline && m_GradientPipeline->IsInitialized();
+		const bool l_ToneMapReady = m_ToneMapPipeline && m_ToneMapPipeline->IsInitialized();
 
-		return l_CoreReady && l_FrameReady && l_GradientReady;
+		return l_CoreReady && l_FrameReady && l_GradientReady && l_ToneMapReady;
 	}
 
 	RenderOutcome VulkanRenderer::Render(const RenderRequest& request)
@@ -368,9 +398,8 @@ namespace Engine
 			return l_UploadResult;
 		}
 
-		// 2. The previous frame's blit read the image, the compute write must wait for it and the layout must become GENERAL
-		// Contents are overwritten in full, so the old ones can be discarded regardless of the tracked layout
-		m_GradientImage->RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true);
+		// 2. The previous frame's tone map fetched the image, the compute write must wait for it and the layout must become GENERAL contents are overwritten in full, so the old ones can be discarded regardless of the tracked layout
+		m_GradientImage->RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true);
 
 		// 3. Dispatch, the descriptor writes go straight into the command buffer so no descriptor set outlives the recording
 		const VkDescriptorImageInfo l_OutputImageInfo
@@ -410,79 +439,90 @@ namespace Engine
 		// Rounded up so partial edge workgroups are dispatched, the shader bounds-checks the invocations that fall outside
 		vkCmdDispatch(commandBuffer, DivideRoundingUp(l_Extent.width, k_GradientWorkgroupSize), DivideRoundingUp(l_Extent.height, k_GradientWorkgroupSize), 1);
 
-		// 4. Compute writes become visible to the blit's transfer read
-		m_GradientImage->RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+		// 4. Gradient writes become visible to the tone map's sampled read
+		m_GradientImage->RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
 
-		// 5. The swapchain image's first access is the blit, the acquire semaphore is waited at the transfer stage so the transition starts there
+		// 5. The swapchain image's first access is the tone map's storage write, the acquire semaphore is waited at the compute stage so the transition starts there
 		const VkImageSubresourceRange l_ColorRange = VulkanImage::GetColorRange();
 
-		VkImageMemoryBarrier2 l_ToTransferBarrier
+		VkImageMemoryBarrier2 l_ToStorageBarrier
 		{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-			.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+			.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 			.srcAccessMask = VK_ACCESS_2_NONE,
-			.dstStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT,
-			.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+			.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
 			.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_GENERAL,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.image = l_SwapchainImage,
 			.subresourceRange = l_ColorRange,
 		};
 
-		VkDependencyInfo l_ToTransferDependency
+		VkDependencyInfo l_ToStorageDependency
 		{
 			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
 			.imageMemoryBarrierCount = 1,
-			.pImageMemoryBarriers = &l_ToTransferBarrier,
+			.pImageMemoryBarriers = &l_ToStorageBarrier,
 		};
 
-		vkCmdPipelineBarrier2(commandBuffer, &l_ToTransferDependency);
+		vkCmdPipelineBarrier2(commandBuffer, &l_ToStorageDependency);
 
-		// 6. Temporary display path: a same-size blit converts the float image into the UNORM swapchain format, Step 4 replaces it with the tone map pass
-		const VkImageSubresourceLayers l_ColorLayers
+		// 6. Tone map: exposure and the ACES curve turn linear scene light into sRGB display values written straight into the swapchain image
+		const VkDescriptorImageInfo l_ToneMapInputInfo
 		{
-			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-			.mipLevel = 0,
-			.baseArrayLayer = 0,
-			.layerCount = 1,
+			.imageView = m_GradientImage->GetView(),
+			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		};
 
-		const VkOffset3D l_FullExtent{ static_cast<int32_t>(l_Extent.width), static_cast<int32_t>(l_Extent.height), 1 };
-
-		const VkImageBlit2 l_BlitRegion
+		const VkDescriptorImageInfo l_ToneMapOutputInfo
 		{
-			.sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2,
-			.srcSubresource = l_ColorLayers,
-			.srcOffsets = { VkOffset3D{ 0, 0, 0 }, l_FullExtent },
-			.dstSubresource = l_ColorLayers,
-			.dstOffsets = { VkOffset3D{ 0, 0, 0 }, l_FullExtent },
+			.imageView = m_VulkanSwapchain->GetImageView(imageIndex),
+			.imageLayout = VK_IMAGE_LAYOUT_GENERAL,
 		};
 
-		const VkBlitImageInfo2 l_BlitInfo
+		const std::array<VkWriteDescriptorSet, 2> l_ToneMapDescriptorWrites
+		{ {
+			{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstBinding = 0,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+				.pImageInfo = &l_ToneMapInputInfo,
+			},
+			{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstBinding = 1,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+				.pImageInfo = &l_ToneMapOutputInfo,
+			},
+		} };
+
+		const ToneMapParameters l_ToneMapParameters
 		{
-			.sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
-			.srcImage = m_GradientImage->GetHandle(),
-			.srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			.dstImage = l_SwapchainImage,
-			.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			.regionCount = 1,
-			.pRegions = &l_BlitRegion,
-			.filter = VK_FILTER_NEAREST,
+			.Width = l_Extent.width,
+			.Height = l_Extent.height,
+			.Exposure = request.Exposure,
+			.Padding = 0.0f,
 		};
 
-		vkCmdBlitImage2(commandBuffer, &l_BlitInfo);
+		m_ToneMapPipeline->Bind(commandBuffer);
+		m_ToneMapPipeline->PushDescriptors(commandBuffer, l_ToneMapDescriptorWrites);
+		m_ToneMapPipeline->PushConstants(commandBuffer, &l_ToneMapParameters, sizeof(l_ToneMapParameters));
+
+		vkCmdDispatch(commandBuffer, DivideRoundingUp(l_Extent.width, k_ToneMapWorkgroupSize), DivideRoundingUp(l_Extent.height, k_ToneMapWorkgroupSize), 1);
 
 		// 7. Presentation engine reads are made visible through the render finished semaphore, the barrier only changes layout
 		VkImageMemoryBarrier2 l_ToPresentBarrier
 		{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-			.srcStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT,
-			.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+			.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+			.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
 			.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 			.dstAccessMask = VK_ACCESS_2_NONE,
-			.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.oldLayout = VK_IMAGE_LAYOUT_GENERAL,
 			.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -609,7 +649,6 @@ namespace Engine
 			.Height = l_Extent.height,
 			.Format = k_GradientImageFormat,
 			.Usage = k_GradientImageUsage,
-			.AdditionalFormatFeatures = VK_FORMAT_FEATURE_BLIT_SRC_BIT,
 			.DebugName = "gradient",
 		};
 
@@ -642,6 +681,78 @@ namespace Engine
 		}
 	}
 
+	VkResult VulkanRenderer::CreateToneMapResources()
+	{
+		PT_CORE_INFO("------- CREATING TONE MAP RESOURCES -------");
+
+		// The module only has to outlive pipeline creation
+		VulkanShaderModule l_Shader;
+		VkResult l_Result = l_Shader.Initialize(*m_VulkanDevice, FileSystem::GetShaderDirectory() / k_ToneMapShaderFile);
+		if (l_Result != VK_SUCCESS)
+		{
+			return l_Result;
+		}
+
+		const std::array<VkDescriptorSetLayoutBinding, 2> l_Bindings
+		{ {
+			{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+			},
+			{
+				.binding = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+			},
+		} };
+
+		// The parameters are small enough to push per dispatch, so the pass owns no frame-local buffers
+		const std::array<VkPushConstantRange, 1> l_PushConstantRanges
+		{ {
+			{
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+				.offset = 0,
+				.size = static_cast<uint32_t>(sizeof(ToneMapParameters)),
+			},
+		} };
+
+		const VulkanComputePipelineSpecification l_PipelineSpecification
+		{
+			.Shader = &l_Shader,
+			.EntryPoint = k_ToneMapEntryPoint,
+			.Bindings = l_Bindings,
+			.PushConstantRanges = l_PushConstantRanges,
+			.DebugName = "tone map",
+		};
+
+		m_ToneMapPipeline = std::make_unique<VulkanComputePipeline>();
+		l_Result = m_ToneMapPipeline->Initialize(*m_VulkanDevice, l_PipelineSpecification);
+		if (l_Result != VK_SUCCESS)
+		{
+			DestroyToneMapResources();
+
+			return l_Result;
+		}
+
+		l_Shader.Shutdown();
+
+		PT_CORE_INFO("------- TONE MAP RESOURCES CREATED -------");
+
+		return VK_SUCCESS;
+	}
+
+	void VulkanRenderer::DestroyToneMapResources()
+	{
+		if (m_ToneMapPipeline)
+		{
+			m_ToneMapPipeline->Shutdown();
+			m_ToneMapPipeline.reset();
+		}
+	}
+
 	void VulkanRenderer::OnFramebufferResized()
 	{
 		if (m_VulkanSwapchain)
@@ -664,6 +775,7 @@ namespace Engine
 			m_VulkanSynchronization->WaitForAllFrames();
 		}
 
+		DestroyToneMapResources();
 		DestroyGradientResources();
 
 		if (m_VulkanCommandPool)

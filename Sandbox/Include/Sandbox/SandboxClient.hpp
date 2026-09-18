@@ -29,9 +29,14 @@ namespace Sandbox
 
 		static constexpr float k_GradientSpeed = 1.5f;
 
+		// Exposure is stepped in photographic stops and converted to a linear scale for the render request
+		static constexpr float k_ExposureStepStops = 0.5f;
+		static constexpr float k_ExposureRangeStops = 8.0f;
+
 		size_t m_ClearColorIndex = 0;
 		float m_GradientPhase = 0.0f;
 		bool m_GradientPaused = false;
+		float m_ExposureStops = 0.0f;
 		float m_StatisticsElapsed = 0.0f;
 		uint32_t m_StatisticsFrames = 0;
 		float m_StatisticsMouseDeltaX = 0.0f;

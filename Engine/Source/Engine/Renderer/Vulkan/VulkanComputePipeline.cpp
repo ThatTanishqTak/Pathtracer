@@ -124,6 +124,16 @@ namespace Engine
 		vkCmdPushDescriptorSet(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_PipelineLayout, 0, static_cast<uint32_t>(writes.size()), writes.data());
 	}
 
+	void VulkanComputePipeline::PushConstants(VkCommandBuffer commandBuffer, const void* data, uint32_t size) const
+	{
+		if (data == nullptr || size == 0)
+		{
+			return;
+		}
+
+		vkCmdPushConstants(commandBuffer, m_PipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, size, data);
+	}
+
 	VkResult VulkanComputePipeline::CreateDescriptorSetLayout(const VulkanComputePipelineSpecification& specification)
 	{
 		VkDescriptorSetLayoutCreateInfo l_CreateInfo

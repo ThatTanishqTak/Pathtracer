@@ -199,9 +199,9 @@ namespace Engine
 		VkSemaphoreSubmitInfo l_WaitSemaphoreInfo
 		{
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-			.semaphore = m_ImageAvailableSemaphores[GetFrameIndex()],
-			.value = 0,
-			.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+				.semaphore = m_ImageAvailableSemaphores[GetFrameIndex()],
+				.value = 0,
+				.stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
 		};
 
 		VkSemaphoreSubmitInfo l_SignalSemaphoreInfos[2]

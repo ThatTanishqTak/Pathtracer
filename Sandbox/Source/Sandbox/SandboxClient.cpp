@@ -1,5 +1,6 @@
 #include "Sandbox/SandboxClient.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 
@@ -10,7 +11,7 @@ namespace Sandbox
 		m_Services = &services;
 
 		PT_APP_INFO("Sandbox client started, {}x{} window", m_Services->GetWindowWidth(), m_Services->GetWindowHeight());
-		PT_APP_INFO("Controls: Space cycles the gradient tint, P pauses the gradient, Tab toggles mouse capture, Escape closes");
+		PT_APP_INFO("Controls: Space cycles the gradient tint, P pauses the gradient, Equals and Minus step exposure, Tab toggles mouse capture, Escape closes");
 	}
 
 	void SandboxClient::OnStop() noexcept
@@ -81,6 +82,14 @@ namespace Sandbox
 			PT_APP_INFO("Gradient {}", m_GradientPaused ? "paused" : "running");
 		}
 
+		if (input.WasKeyPressed(Engine::Key::Equals) || input.WasKeyPressed(Engine::Key::Minus))
+		{
+			const float l_Direction = input.WasKeyPressed(Engine::Key::Equals) ? 1.0f : -1.0f;
+			m_ExposureStops = std::clamp(m_ExposureStops + l_Direction * k_ExposureStepStops, -k_ExposureRangeStops, k_ExposureRangeStops);
+
+			PT_APP_INFO("Exposure {:+.1f} stops ({:.3f}x)", m_ExposureStops, std::exp2(m_ExposureStops));
+		}
+
 		if (input.WasKeyPressed(Engine::Key::Tab))
 		{
 			m_Services->SetMouseCaptured(!m_Services->IsMouseCaptured());
@@ -123,6 +132,7 @@ namespace Sandbox
 		Engine::RenderRequest l_Request;
 		l_Request.ClearColor = k_ClearColors[m_ClearColorIndex];
 		l_Request.GradientPhase = m_GradientPhase;
+		l_Request.Exposure = std::exp2(m_ExposureStops);
 
 		return l_Request;
 	}

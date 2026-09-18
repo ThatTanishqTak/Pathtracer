@@ -14,19 +14,43 @@ namespace Engine
 	{
 		constexpr VkFormat k_PreferredFormat = VK_FORMAT_B8G8R8A8_UNORM;
 		constexpr VkColorSpaceKHR k_PreferredColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-		constexpr VkImageUsageFlags k_ImageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
-		VkSurfaceFormatKHR ChooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats)
+		// The tone map dispatch writes the images as storage images, the color attachment usage is for a later UI pass
+		constexpr VkImageUsageFlags k_ImageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+		bool SupportsStorageImage(VkPhysicalDevice physicalDevice, VkFormat format)
+		{
+			VkFormatProperties l_FormatProperties{};
+			vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &l_FormatProperties);
+
+			return (l_FormatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0;
+		}
+
+		// Storage writes rule out sRGB formats, so the shader encodes sRGB itself and the format must be a storage-capable one in the sRGB nonlinear color space
+		bool ChooseSurfaceFormat(VkPhysicalDevice physicalDevice, const std::vector<VkSurfaceFormatKHR>& formats, VkSurfaceFormatKHR& surfaceFormat)
 		{
 			for (const VkSurfaceFormatKHR& l_Format : formats)
 			{
-				if (l_Format.format == k_PreferredFormat && l_Format.colorSpace == k_PreferredColorSpace)
+				if (l_Format.format == k_PreferredFormat && l_Format.colorSpace == k_PreferredColorSpace && SupportsStorageImage(physicalDevice, l_Format.format))
 				{
-					return l_Format;
+					surfaceFormat = l_Format;
+
+					return true;
 				}
 			}
 
-			return formats[0];
+			// Any other storage-capable format in the same color space keeps the shader's sRGB encode correct
+			for (const VkSurfaceFormatKHR& l_Format : formats)
+			{
+				if (l_Format.colorSpace == k_PreferredColorSpace && SupportsStorageImage(physicalDevice, l_Format.format))
+				{
+					surfaceFormat = l_Format;
+
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		VkPresentModeKHR ChoosePresentMode(const std::vector<VkPresentModeKHR>& presentModes, bool verticalSync)
@@ -432,7 +456,7 @@ namespace Engine
 
 		if ((l_Capabilities.supportedUsageFlags & k_ImageUsage) != k_ImageUsage)
 		{
-			PT_CORE_CRITICAL("The surface does not support the required swapchain image usage");
+			PT_CORE_CRITICAL("The surface does not support storage and color attachment swapchain images");
 
 			return SwapchainResult{ SwapchainStatus::Failed, VK_ERROR_FEATURE_NOT_PRESENT };
 		}
@@ -457,7 +481,14 @@ namespace Engine
 			return SwapchainResult{ SwapchainStatus::Failed, l_PresentModesResult != VK_SUCCESS ? l_PresentModesResult : VK_ERROR_INITIALIZATION_FAILED };
 		}
 
-		const VkSurfaceFormatKHR l_SurfaceFormat = ChooseSurfaceFormat(l_Formats);
+		VkSurfaceFormatKHR l_SurfaceFormat{};
+		if (!ChooseSurfaceFormat(l_PhysicalDevice, l_Formats, l_SurfaceFormat))
+		{
+			PT_CORE_CRITICAL("No surface format supports storage image writes in the sRGB nonlinear color space");
+
+			return SwapchainResult{ SwapchainStatus::Failed, VK_ERROR_FORMAT_NOT_SUPPORTED };
+		}
+
 		const VkPresentModeKHR l_PresentMode = ChoosePresentMode(l_PresentModes, m_VerticalSync);
 		const VkExtent2D l_Extent = ChooseExtent(l_Capabilities);
 
@@ -534,6 +565,7 @@ namespace Engine
 		}
 
 		PT_CORE_TRACE("Swapchain Resolution: {}x{}", m_Extent.width, m_Extent.height);
+		PT_CORE_TRACE("Swapchain Format: {}", static_cast<int>(m_ImageFormat));
 		PT_CORE_TRACE("Swapchain Images: {}", m_Images.size());
 		PT_CORE_TRACE("Swapchain Present Mode: {}", PresentModeToString(m_PresentMode));
 

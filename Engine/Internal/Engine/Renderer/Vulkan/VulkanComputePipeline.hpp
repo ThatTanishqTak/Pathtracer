@@ -45,8 +45,8 @@ namespace Engine
 
 		void Bind(VkCommandBuffer commandBuffer) const;
 
-		// Writes go straight into the command buffer, dstSet is ignored and set 0 is always the target
-		void PushDescriptors(VkCommandBuffer commandBuffer, std::span<const VkWriteDescriptorSet> writes) const;
+		void PushDescriptors(VkCommandBuffer commandBuffer, std::span<const VkWriteDescriptorSet> writes) const; // Writes go straight into the command buffer, dstSet is ignored and set 0 is always the target
+		void PushConstants(VkCommandBuffer commandBuffer, const void* data, uint32_t size) const; // One block at offset 0 for the compute stage, the specification's push constant range must cover size bytes
 
 		VkPipeline GetHandle() const { return m_Pipeline; }
 		VkPipelineLayout GetLayout() const { return m_PipelineLayout; }

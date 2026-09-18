@@ -91,8 +91,8 @@ namespace Engine
 		VkExtent2D m_Extent{};
 		VkPresentModeKHR m_PresentMode = VK_PRESENT_MODE_FIFO_KHR;
 
-		std::vector<VkImage> m_Images;
-		std::vector<VkImageView> m_ImageViews;
+		std::vector<VkImage> m_Images{};
+		std::vector<VkImageView> m_ImageViews{};
 
 		uint64_t m_Generation = 0;
 

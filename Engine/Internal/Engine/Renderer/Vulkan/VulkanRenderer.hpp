@@ -77,6 +77,9 @@ namespace Engine
 		VkResult CreateGradientImage();
 		void DestroyGradientResources();
 
+		VkResult CreateToneMapResources();
+		void DestroyToneMapResources();
+
 		VkResult RecordFrame(VkCommandBuffer commandBuffer, uint32_t frameSlot, uint32_t imageIndex, const RenderRequest& request);
 
 		RenderOutcome FailFrame(const FrameRecord& frame, const char* stage, VkResult result);
@@ -91,6 +94,7 @@ namespace Engine
 		std::unique_ptr<VulkanCommandPool> m_VulkanCommandPool;
 		std::unique_ptr<VulkanComputePipeline> m_GradientPipeline;
 		std::unique_ptr<VulkanImage> m_GradientImage;
+		std::unique_ptr<VulkanComputePipeline> m_ToneMapPipeline;
 		std::array<FrameResources, VulkanSynchronization::k_MaxFramesInFlight> m_FrameResources;
 
 		bool m_VolkInitialized = false;
