@@ -20,6 +20,8 @@ namespace Engine
 
 		int GetWindowWidth() const;
 		int GetWindowHeight() const;
+		int GetFramebufferWidth() const;
+		int GetFramebufferHeight() const;
 
 	private:
 		Application* m_Application = nullptr;

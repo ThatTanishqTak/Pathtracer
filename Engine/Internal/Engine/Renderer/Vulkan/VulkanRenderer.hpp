@@ -22,7 +22,6 @@ namespace Engine
 	class VulkanMemoryAllocator;
 	class VulkanSwapchain;
 	class VulkanCommandPool;
-	class VulkanBuffer;
 	class VulkanImage;
 	class VulkanComputePipeline;
 
@@ -64,23 +63,23 @@ namespace Engine
 			Stage AcquireStage = Stage::None;
 		};
 
+		// The diagnostic pass pushes its parameters, so a slot only remembers the timeline value its last submission signals
 		struct FrameResources
 		{
-			std::unique_ptr<VulkanBuffer> GradientParameters;
 			uint64_t SubmittedTimelineValue = 0;
 		};
 
 		void InitializeVolk();
 		void ShutdownVolk();
 
-		VkResult CreateGradientResources();
-		VkResult CreateGradientImage();
-		void DestroyGradientResources();
+		VkResult CreateDiagnosticResources();
+		VkResult CreateHdrImage();
+		void DestroyDiagnosticResources();
 
 		VkResult CreateToneMapResources();
 		void DestroyToneMapResources();
 
-		VkResult RecordFrame(VkCommandBuffer commandBuffer, uint32_t frameSlot, uint32_t imageIndex, const RenderRequest& request);
+		VkResult RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderRequest& request);
 
 		RenderOutcome FailFrame(const FrameRecord& frame, const char* stage, VkResult result);
 
@@ -92,8 +91,8 @@ namespace Engine
 		std::unique_ptr<VulkanSwapchain> m_VulkanSwapchain;
 		std::unique_ptr<VulkanSynchronization> m_VulkanSynchronization;
 		std::unique_ptr<VulkanCommandPool> m_VulkanCommandPool;
-		std::unique_ptr<VulkanComputePipeline> m_GradientPipeline;
-		std::unique_ptr<VulkanImage> m_GradientImage;
+		std::unique_ptr<VulkanComputePipeline> m_DiagnosticPipeline;
+		std::unique_ptr<VulkanImage> m_HdrImage;
 		std::unique_ptr<VulkanComputePipeline> m_ToneMapPipeline;
 		std::array<FrameResources, VulkanSynchronization::k_MaxFramesInFlight> m_FrameResources;
 

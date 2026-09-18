@@ -10,3 +10,6 @@
 [submodule "Vendor/VulkanMemoryAllocator"]
 	path = Vendor/VulkanMemoryAllocator
 	url = https://github.com/ThatTanishqTak/VulkanMemoryAllocator.git
+[submodule "Vendor/glm"]
+	path = Vendor/glm
+	url = https://github.com/ThatTanishqTak/glm.git

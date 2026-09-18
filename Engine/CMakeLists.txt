@@ -82,8 +82,13 @@ target_compile_options(${TARGET_NAME} PRIVATE
 # Unlocks the internal headers
 target_compile_definitions(${TARGET_NAME} PRIVATE PT_ENGINE_BUILD VK_NO_PROTOTYPES VMA_STATIC_VULKAN_FUNCTIONS=0 VMA_DYNAMIC_VULKAN_FUNCTIONS=1 $<$<CONFIG:Debug>:PT_DEBUG>)
 
+# Public so that both Sanbox and Editor can see the same glm configuration
+target_compile_definitions(${TARGET_NAME} PUBLIC GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
+
 # Third-party libraries
 target_link_libraries(${TARGET_NAME}
+    PUBLIC    
+        glm::glm
     PRIVATE 
         SDL3::SDL3
         Vulkan::Headers

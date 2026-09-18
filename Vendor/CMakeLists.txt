@@ -40,6 +40,14 @@ set(SPDLOG_INSTALL OFF)
 add_subdirectory(spdlog SYSTEM)
 # --------------
 
+# glm --------------
+set(GLM_BUILD_LIBRARY OFF)
+set(GLM_BUILD_TESTS OFF)
+set(GLM_BUILD_INSTALL OFF)
+
+add_subdirectory(glm SYSTEM)
+# --------------
+
 # Vulkan --------------
 find_package(Vulkan 1.4 REQUIRED GLOBAL)
 find_program(Vulkan_SLANGC_EXECUTABLE NAMES slangc

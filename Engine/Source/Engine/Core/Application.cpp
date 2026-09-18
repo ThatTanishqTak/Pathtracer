@@ -48,6 +48,16 @@ namespace Engine
 		return m_Application->GetWindowHeight();
 	}
 
+	int ApplicationServices::GetFramebufferWidth() const
+	{
+		return m_Application->GetFramebufferWidth();
+	}
+
+	int ApplicationServices::GetFramebufferHeight() const
+	{
+		return m_Application->GetFramebufferHeight();
+	}
+
 	Application::Application() = default;
 	Application::~Application() = default;
 
@@ -414,6 +424,30 @@ namespace Engine
 		}
 
 		return m_Window->GetHeight();
+	}
+
+	int Application::GetFramebufferWidth() const
+	{
+		int l_Width = 0;
+		int l_Height = 0;
+		if (m_Window)
+		{
+			m_Window->GetFramebufferSize(l_Width, l_Height);
+		}
+
+		return l_Width;
+	}
+
+	int Application::GetFramebufferHeight() const
+	{
+		int l_Width = 0;
+		int l_Height = 0;
+		if (m_Window)
+		{
+			m_Window->GetFramebufferSize(l_Width, l_Height);
+		}
+
+		return l_Height;
 	}
 
 	const ApplicationSpecification& Application::GetSpecification() const

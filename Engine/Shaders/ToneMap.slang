@@ -6,7 +6,7 @@ struct ToneMapParameters
 	float Padding;
 };
 
-// Binding 0: the linear scene color the gradient pass wrote, fetched by texel so a same-size pass needs no sampler
+// Binding 0: the linear scene color the diagnostic pass wrote, fetched by texel so a same-size pass needs no sampler
 [[vk::binding(0, 0)]]
 Texture2D<float4> u_Input;
 

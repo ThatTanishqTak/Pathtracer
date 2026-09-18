@@ -45,6 +45,8 @@ namespace Engine
 
 		int GetWindowWidth() const;
 		int GetWindowHeight() const;
+		int GetFramebufferWidth() const;
+		int GetFramebufferHeight() const;
 
 		const ApplicationSpecification& GetSpecification() const;
 

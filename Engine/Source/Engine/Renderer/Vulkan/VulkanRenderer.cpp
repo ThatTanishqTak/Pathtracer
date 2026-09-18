@@ -7,13 +7,13 @@
 #include "Engine/Renderer/Vulkan/VulkanSwapchain.hpp"
 #include "Engine/Renderer/Vulkan/VulkanSynchronization.hpp"
 #include "Engine/Renderer/Vulkan/VulkanCommandPool.hpp"
-#include "Engine/Renderer/Vulkan/VulkanBuffer.hpp"
 #include "Engine/Renderer/Vulkan/VulkanImage.hpp"
 #include "Engine/Renderer/Vulkan/VulkanShaderModule.hpp"
 #include "Engine/Renderer/Vulkan/VulkanComputePipeline.hpp"
 #include "Engine/Renderer/Vulkan/VulkanUtilities.hpp"
 #include "Engine/Core/FileSystem.hpp"
 #include "Engine/Core/Log.hpp"
+#include "Engine/Scene/Camera.hpp"
 
 #include <volk.h>
 
@@ -25,33 +25,53 @@ namespace Engine
 {
 	namespace
 	{
-		constexpr VkFormat k_GradientImageFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
+		constexpr VkFormat k_HdrImageFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
+		constexpr VkImageUsageFlags k_HdrImageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-		constexpr VkImageUsageFlags k_GradientImageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-		constexpr uint32_t k_GradientWorkgroupSize = 8;
-		constexpr const char* k_GradientShaderFile = "Gradient.slang.spv";
-		constexpr const char* k_GradientEntryPoint = "computeMain";
+		constexpr uint32_t k_DiagnosticWorkgroupSize = 8;
+		constexpr const char* k_DiagnosticShaderFile = "Diagnostic.slang.spv";
+		constexpr const char* k_DiagnosticEntryPoint = "computeMain";
 
 		constexpr uint32_t k_ToneMapWorkgroupSize = 8;
 		constexpr const char* k_ToneMapShaderFile = "ToneMap.slang.spv";
 		constexpr const char* k_ToneMapEntryPoint = "computeMain";
 
-		// Must match GradientParameters in Gradient.slang, std140 layout: float4 at 0, uint2 at 16, float at 24, float at 28
-		struct GradientParameters
+		// Must match CameraFrameBlock in Diagnostic.slang, std430 layout: four float4 at 0, 16, 32 and 48. The w components are unused
+		struct CameraFrameBlock
 		{
-			std::array<float, 4> BaseColor{};
-			uint32_t Width = 0;
-			uint32_t Height = 0;
-			float Phase = 0.0f;
-			float Padding = 0.0f;
+			std::array<float, 4> Origin{};
+			std::array<float, 4> Forward{};
+			std::array<float, 4> RightScaled{};
+			std::array<float, 4> UpScaled{};
 		};
 
-		static_assert(sizeof(GradientParameters) == 32, "GradientParameters must match the 32 byte std140 block in Gradient.slang");
-		static_assert(offsetof(GradientParameters, BaseColor) == 0, "BaseColor must sit at std140 offset 0");
-		static_assert(offsetof(GradientParameters, Width) == 16, "Extent.x must sit at std140 offset 16");
-		static_assert(offsetof(GradientParameters, Height) == 20, "Extent.y must sit at std140 offset 20");
-		static_assert(offsetof(GradientParameters, Phase) == 24, "Phase must sit at std140 offset 24");
-		static_assert(offsetof(GradientParameters, Padding) == 28, "Padding must sit at std140 offset 28");
+		static_assert(sizeof(CameraFrameBlock) == 64, "CameraFrameBlock must match the 64 byte block in Diagnostic.slang");
+		static_assert(offsetof(CameraFrameBlock, Origin) == 0, "Origin must sit at std430 offset 0");
+		static_assert(offsetof(CameraFrameBlock, Forward) == 16, "Forward must sit at std430 offset 16");
+		static_assert(offsetof(CameraFrameBlock, RightScaled) == 32, "RightScaled must sit at std430 offset 32");
+		static_assert(offsetof(CameraFrameBlock, UpScaled) == 48, "UpScaled must sit at std430 offset 48");
+
+		// Must match DiagnosticParameters in Diagnostic.slang, std430 push constant layout: CameraFrameBlock at 0, uint2 at 64, uint at 72, uint at 76
+		struct DiagnosticParameters
+		{
+			CameraFrameBlock Camera{};
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			uint32_t Mode = 0;
+			uint32_t Padding = 0;
+		};
+
+		static_assert(sizeof(DiagnosticParameters) == 80, "DiagnosticParameters must match the 80 byte push constant block in Diagnostic.slang");
+		static_assert(offsetof(DiagnosticParameters, Camera) == 0, "Camera must sit at std430 offset 0");
+		static_assert(offsetof(DiagnosticParameters, Width) == 64, "Extent.x must sit at std430 offset 64");
+		static_assert(offsetof(DiagnosticParameters, Height) == 68, "Extent.y must sit at std430 offset 68");
+		static_assert(offsetof(DiagnosticParameters, Mode) == 72, "Mode must sit at std430 offset 72");
+		static_assert(offsetof(DiagnosticParameters, Padding) == 76, "Padding must sit at std430 offset 76");
+
+		std::array<float, 4> ToFloat4(const Math::Vector3& value)
+		{
+			return { value.x, value.y, value.z, 0.0f };
+		}
 
 		// Must match ToneMapParameters in ToneMap.slang, std430 push constant layout: uint2 at 0, float at 8, float at 12
 		struct ToneMapParameters
@@ -162,9 +182,9 @@ namespace Engine
 			return;
 		}
 
-		if (CreateGradientResources() != VK_SUCCESS)
+		if (CreateDiagnosticResources() != VK_SUCCESS)
 		{
-			PT_CORE_CRITICAL("Failed to create the gradient resources");
+			PT_CORE_CRITICAL("Failed to create the diagnostic resources");
 
 			Shutdown();
 
@@ -187,10 +207,10 @@ namespace Engine
 	{
 		const bool l_CoreReady = m_VulkanInstance && m_VulkanInstance->IsInitialized() && m_VulkanSurface && m_VulkanSurface->IsInitialized() && m_VulkanDevice && m_VulkanDevice->IsInitialized() && m_VulkanMemoryAllocator && m_VulkanMemoryAllocator->IsInitialized();
 		const bool l_FrameReady = m_VulkanSwapchain && m_VulkanSwapchain->IsInitialized() && m_VulkanSynchronization && m_VulkanSynchronization->IsInitialized() && m_VulkanCommandPool && m_VulkanCommandPool->IsInitialized();
-		const bool l_GradientReady = m_GradientPipeline && m_GradientPipeline->IsInitialized();
+		const bool l_DiagnosticReady = m_DiagnosticPipeline && m_DiagnosticPipeline->IsInitialized();
 		const bool l_ToneMapReady = m_ToneMapPipeline && m_ToneMapPipeline->IsInitialized();
 
-		return l_CoreReady && l_FrameReady && l_GradientReady && l_ToneMapReady;
+		return l_CoreReady && l_FrameReady && l_DiagnosticReady && l_ToneMapReady;
 	}
 
 	RenderOutcome VulkanRenderer::Render(const RenderRequest& request)
@@ -230,27 +250,27 @@ namespace Engine
 				}
 			}
 
-			// Recreate waited for the device to go idle, so the old gradient image has no GPU users left and can follow the extent
-			const VkResult l_ImageResult = CreateGradientImage();
+			// Recreate waited for the device to go idle, so the old HDR image has no GPU users left and can follow the extent
+			const VkResult l_ImageResult = CreateHdrImage();
 			if (l_ImageResult != VK_SUCCESS)
 			{
-				return FailFrame(l_Frame, "recreating the gradient image", l_ImageResult);
+				return FailFrame(l_Frame, "recreating the HDR image", l_ImageResult);
 			}
 		}
 
 		// The image tracks the swapchain extent through the recreate path above, anything else is a logic error worth stopping on
-		if (!m_GradientImage || !m_GradientImage->IsInitialized())
+		if (!m_HdrImage || !m_HdrImage->IsInitialized())
 		{
-			return FailFrame(l_Frame, "validating the gradient image", VK_ERROR_INITIALIZATION_FAILED);
+			return FailFrame(l_Frame, "validating the HDR image", VK_ERROR_INITIALIZATION_FAILED);
 		}
 
 		const VkExtent2D l_SwapchainExtent = m_VulkanSwapchain->GetExtent();
-		const VkExtent2D l_GradientExtent = m_GradientImage->GetExtent();
-		if (l_SwapchainExtent.width != l_GradientExtent.width || l_SwapchainExtent.height != l_GradientExtent.height)
+		const VkExtent2D l_HdrExtent = m_HdrImage->GetExtent();
+		if (l_SwapchainExtent.width != l_HdrExtent.width || l_SwapchainExtent.height != l_HdrExtent.height)
 		{
-			PT_CORE_ERROR("Gradient image is {}x{} but the swapchain is {}x{}", l_GradientExtent.width, l_GradientExtent.height, l_SwapchainExtent.width, l_SwapchainExtent.height);
+			PT_CORE_ERROR("HDR image is {}x{} but the swapchain is {}x{}", l_HdrExtent.width, l_HdrExtent.height, l_SwapchainExtent.width, l_SwapchainExtent.height);
 
-			return FailFrame(l_Frame, "validating the gradient image extent", VK_ERROR_UNKNOWN);
+			return FailFrame(l_Frame, "validating the HDR image extent", VK_ERROR_UNKNOWN);
 		}
 
 		// 2. Rehook semaphores after a generation change, then wait for the slot's previous frame and its acquire
@@ -297,7 +317,7 @@ namespace Engine
 			return FailFrame(l_Frame, "beginning the command buffer", l_BeginResult);
 		}
 
-		const VkResult l_RecordResult = RecordFrame(l_CommandBuffer, l_Frame.FrameSlot, l_Frame.ImageIndex, request);
+		const VkResult l_RecordResult = RecordFrame(l_CommandBuffer, l_Frame.ImageIndex, request);
 		if (l_RecordResult != VK_SUCCESS)
 		{
 			return FailFrame(l_Frame, "recording the frame", l_RecordResult);
@@ -376,46 +396,40 @@ namespace Engine
 		return RenderOutcome::Fatal;
 	}
 
-	VkResult VulkanRenderer::RecordFrame(VkCommandBuffer commandBuffer, uint32_t frameSlot, uint32_t imageIndex, const RenderRequest& request)
+	VkResult VulkanRenderer::RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderRequest& request)
 	{
 		VkImage l_SwapchainImage = m_VulkanSwapchain->GetImage(imageIndex);
-		const VkExtent2D l_Extent = m_GradientImage->GetExtent();
-		FrameResources& l_FrameResources = m_FrameResources[frameSlot];
+		const VkExtent2D l_Extent = m_HdrImage->GetExtent();
 
-		// 1. Frame-local parameters, WaitForFrame already retired this slot's previous submission so the buffer is free to overwrite
-		const GradientParameters l_Parameters
+		// 1. The previous frame's tone map fetched the image, the compute write must wait for it and the layout must become GENERAL. Contents are overwritten in full, so the old ones can be discarded regardless of the tracked layout
+		m_HdrImage->RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true);
+
+		// 2. The camera block carries the exact vectors the CPU ray generation uses, the shader evaluates the same expression from them
+		const CameraRayFrame l_CameraFrame = GetCameraRayFrame(request.ActiveCamera);
+
+		const DiagnosticParameters l_Parameters
 		{
-			.BaseColor = request.ClearColor,
+			.Camera =
+			{
+				.Origin = ToFloat4(l_CameraFrame.Origin),
+				.Forward = ToFloat4(l_CameraFrame.Forward),
+				.RightScaled = ToFloat4(l_CameraFrame.RightScaled),
+				.UpScaled = ToFloat4(l_CameraFrame.UpScaled),
+			},
 			.Width = l_Extent.width,
 			.Height = l_Extent.height,
-			.Phase = request.GradientPhase,
-			.Padding = 0.0f,
+			.Mode = static_cast<uint32_t>(request.Mode),
+			.Padding = 0,
 		};
 
-		const VkResult l_UploadResult = l_FrameResources.GradientParameters->Upload(&l_Parameters, sizeof(l_Parameters));
-		if (l_UploadResult != VK_SUCCESS)
-		{
-			return l_UploadResult;
-		}
-
-		// 2. The previous frame's tone map fetched the image, the compute write must wait for it and the layout must become GENERAL contents are overwritten in full, so the old ones can be discarded regardless of the tracked layout
-		m_GradientImage->RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true);
-
-		// 3. Dispatch, the descriptor writes go straight into the command buffer so no descriptor set outlives the recording
+		// 3. Dispatch, the descriptor write goes straight into the command buffer so no descriptor set outlives the recording
 		const VkDescriptorImageInfo l_OutputImageInfo
 		{
-			.imageView = m_GradientImage->GetView(),
+			.imageView = m_HdrImage->GetView(),
 			.imageLayout = VK_IMAGE_LAYOUT_GENERAL,
 		};
 
-		const VkDescriptorBufferInfo l_ParametersBufferInfo
-		{
-			.buffer = l_FrameResources.GradientParameters->GetHandle(),
-			.offset = 0,
-			.range = sizeof(GradientParameters),
-		};
-
-		const std::array<VkWriteDescriptorSet, 2> l_DescriptorWrites
+		const std::array<VkWriteDescriptorSet, 1> l_DescriptorWrites
 		{ {
 			{
 				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -424,23 +438,17 @@ namespace Engine
 				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 				.pImageInfo = &l_OutputImageInfo,
 			},
-			{
-				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-				.dstBinding = 1,
-				.descriptorCount = 1,
-				.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				.pBufferInfo = &l_ParametersBufferInfo,
-			},
 		} };
 
-		m_GradientPipeline->Bind(commandBuffer);
-		m_GradientPipeline->PushDescriptors(commandBuffer, l_DescriptorWrites);
+		m_DiagnosticPipeline->Bind(commandBuffer);
+		m_DiagnosticPipeline->PushDescriptors(commandBuffer, l_DescriptorWrites);
+		m_DiagnosticPipeline->PushConstants(commandBuffer, &l_Parameters, sizeof(l_Parameters));
 
 		// Rounded up so partial edge workgroups are dispatched, the shader bounds-checks the invocations that fall outside
-		vkCmdDispatch(commandBuffer, DivideRoundingUp(l_Extent.width, k_GradientWorkgroupSize), DivideRoundingUp(l_Extent.height, k_GradientWorkgroupSize), 1);
+		vkCmdDispatch(commandBuffer, DivideRoundingUp(l_Extent.width, k_DiagnosticWorkgroupSize), DivideRoundingUp(l_Extent.height, k_DiagnosticWorkgroupSize), 1);
 
-		// 4. Gradient writes become visible to the tone map's sampled read
-		m_GradientImage->RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+		// 4. Diagnostic writes become visible to the tone map's sampled read
+		m_HdrImage->RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
 
 		// 5. The swapchain image's first access is the tone map's storage write, the acquire semaphore is waited at the compute stage so the transition starts there
 		const VkImageSubresourceRange l_ColorRange = VulkanImage::GetColorRange();
@@ -472,7 +480,7 @@ namespace Engine
 		// 6. Tone map: exposure and the ACES curve turn linear scene light into sRGB display values written straight into the swapchain image
 		const VkDescriptorImageInfo l_ToneMapInputInfo
 		{
-			.imageView = m_GradientImage->GetView(),
+			.imageView = m_HdrImage->GetView(),
 			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		};
 
@@ -542,19 +550,19 @@ namespace Engine
 		return VK_SUCCESS;
 	}
 
-	VkResult VulkanRenderer::CreateGradientResources()
+	VkResult VulkanRenderer::CreateDiagnosticResources()
 	{
-		PT_CORE_INFO("------- CREATING GRADIENT RESOURCES -------");
+		PT_CORE_INFO("------- CREATING DIAGNOSTIC RESOURCES -------");
 
 		// The module only has to outlive pipeline creation
 		VulkanShaderModule l_Shader;
-		VkResult l_Result = l_Shader.Initialize(*m_VulkanDevice, FileSystem::GetShaderDirectory() / k_GradientShaderFile);
+		VkResult l_Result = l_Shader.Initialize(*m_VulkanDevice, FileSystem::GetShaderDirectory() / k_DiagnosticShaderFile);
 		if (l_Result != VK_SUCCESS)
 		{
 			return l_Result;
 		}
 
-		const std::array<VkDescriptorSetLayoutBinding, 2> l_Bindings
+		const std::array<VkDescriptorSetLayoutBinding, 1> l_Bindings
 		{ {
 			{
 				.binding = 0,
@@ -562,83 +570,65 @@ namespace Engine
 				.descriptorCount = 1,
 				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 			},
+		} };
+
+		// The camera block is small enough to push per dispatch, so the pass owns no frame-local buffers
+		const std::array<VkPushConstantRange, 1> l_PushConstantRanges
+		{ {
 			{
-				.binding = 1,
-				.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				.descriptorCount = 1,
 				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+				.offset = 0,
+				.size = static_cast<uint32_t>(sizeof(DiagnosticParameters)),
 			},
 		} };
 
 		const VulkanComputePipelineSpecification l_PipelineSpecification
 		{
 			.Shader = &l_Shader,
-			.EntryPoint = k_GradientEntryPoint,
+			.EntryPoint = k_DiagnosticEntryPoint,
 			.Bindings = l_Bindings,
-			.DebugName = "gradient",
+			.PushConstantRanges = l_PushConstantRanges,
+			.DebugName = "diagnostic",
 		};
 
-		m_GradientPipeline = std::make_unique<VulkanComputePipeline>();
-		l_Result = m_GradientPipeline->Initialize(*m_VulkanDevice, l_PipelineSpecification);
+		m_DiagnosticPipeline = std::make_unique<VulkanComputePipeline>();
+		l_Result = m_DiagnosticPipeline->Initialize(*m_VulkanDevice, l_PipelineSpecification);
 		if (l_Result != VK_SUCCESS)
 		{
-			DestroyGradientResources();
+			DestroyDiagnosticResources();
 
 			return l_Result;
 		}
 
 		l_Shader.Shutdown();
 
-		// One parameter buffer per frame slot, WaitForFrame guarantees the slot's previous submission finished before it is rewritten
-		for (size_t i = 0; i < m_FrameResources.size(); i++)
-		{
-			const VulkanBufferSpecification l_BufferSpecification
-			{
-				.Size = sizeof(GradientParameters),
-				.Usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-				.Memory = BufferMemory::HostUpload,
-				.DebugName = "gradient parameters",
-			};
-
-			m_FrameResources[i].GradientParameters = std::make_unique<VulkanBuffer>();
-			m_FrameResources[i].SubmittedTimelineValue = 0;
-
-			l_Result = m_FrameResources[i].GradientParameters->Initialize(*m_VulkanMemoryAllocator, l_BufferSpecification);
-			if (l_Result != VK_SUCCESS)
-			{
-				DestroyGradientResources();
-
-				return l_Result;
-			}
-		}
-
 		// A deferred swapchain has no extent yet, the recreate path in Render() creates the image once it does
 		const VkExtent2D l_Extent = m_VulkanSwapchain->GetExtent();
 		if (l_Extent.width > 0 && l_Extent.height > 0)
 		{
-			l_Result = CreateGradientImage();
+			l_Result = CreateHdrImage();
 			if (l_Result != VK_SUCCESS)
 			{
-				DestroyGradientResources();
+				DestroyDiagnosticResources();
 
 				return l_Result;
 			}
 		}
 
-		PT_CORE_INFO("------- GRADIENT RESOURCES CREATED -------");
+		PT_CORE_INFO("------- DIAGNOSTIC RESOURCES CREATED -------");
 
 		return VK_SUCCESS;
 	}
 
-	VkResult VulkanRenderer::CreateGradientImage()
+	VkResult VulkanRenderer::CreateHdrImage()
 	{
-		if (m_GradientImage)
+		if (m_HdrImage)
 		{
-			m_GradientImage->Shutdown();
+			m_HdrImage->Shutdown();
 		}
 		else
 		{
-			m_GradientImage = std::make_unique<VulkanImage>();
+			m_HdrImage = std::make_unique<VulkanImage>();
 		}
 
 		const VkExtent2D l_Extent = m_VulkanSwapchain->GetExtent();
@@ -647,37 +637,26 @@ namespace Engine
 		{
 			.Width = l_Extent.width,
 			.Height = l_Extent.height,
-			.Format = k_GradientImageFormat,
-			.Usage = k_GradientImageUsage,
-			.DebugName = "gradient",
+			.Format = k_HdrImageFormat,
+			.Usage = k_HdrImageUsage,
+			.DebugName = "hdr",
 		};
 
-		return m_GradientImage->Initialize(*m_VulkanDevice, *m_VulkanMemoryAllocator, l_ImageSpecification);
+		return m_HdrImage->Initialize(*m_VulkanDevice, *m_VulkanMemoryAllocator, l_ImageSpecification);
 	}
 
-	void VulkanRenderer::DestroyGradientResources()
+	void VulkanRenderer::DestroyDiagnosticResources()
 	{
-		if (m_GradientImage)
+		if (m_HdrImage)
 		{
-			m_GradientImage->Shutdown();
-			m_GradientImage.reset();
+			m_HdrImage->Shutdown();
+			m_HdrImage.reset();
 		}
 
-		for (FrameResources& l_FrameResources : m_FrameResources)
+		if (m_DiagnosticPipeline)
 		{
-			if (l_FrameResources.GradientParameters)
-			{
-				l_FrameResources.GradientParameters->Shutdown();
-				l_FrameResources.GradientParameters.reset();
-			}
-
-			l_FrameResources.SubmittedTimelineValue = 0;
-		}
-
-		if (m_GradientPipeline)
-		{
-			m_GradientPipeline->Shutdown();
-			m_GradientPipeline.reset();
+			m_DiagnosticPipeline->Shutdown();
+			m_DiagnosticPipeline.reset();
 		}
 	}
 
@@ -775,8 +754,13 @@ namespace Engine
 			m_VulkanSynchronization->WaitForAllFrames();
 		}
 
+		for (FrameResources& l_FrameResources : m_FrameResources)
+		{
+			l_FrameResources.SubmittedTimelineValue = 0;
+		}
+
 		DestroyToneMapResources();
-		DestroyGradientResources();
+		DestroyDiagnosticResources();
 
 		if (m_VulkanCommandPool)
 		{
