@@ -14,9 +14,11 @@
 #include "Engine/Core/FileSystem.hpp"
 #include "Engine/Core/Log.hpp"
 #include "Engine/Scene/Camera.hpp"
+#include "Engine/Scene/Scene.hpp"
 
 #include <volk.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -36,6 +38,9 @@ namespace Engine
 		constexpr const char* k_ToneMapShaderFile = "ToneMap.slang.spv";
 		constexpr const char* k_ToneMapEntryPoint = "computeMain";
 
+		// Scene records are read as storage buffers, written from the CPU while the slot is retired
+		constexpr VkBufferUsageFlags k_SceneBufferUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
 		// Must match CameraFrameBlock in Diagnostic.slang, std430 layout: four float4 at 0, 16, 32 and 48. The w components are unused
 		struct CameraFrameBlock
 		{
@@ -51,22 +56,28 @@ namespace Engine
 		static_assert(offsetof(CameraFrameBlock, RightScaled) == 32, "RightScaled must sit at std430 offset 32");
 		static_assert(offsetof(CameraFrameBlock, UpScaled) == 48, "UpScaled must sit at std430 offset 48");
 
-		// Must match DiagnosticParameters in Diagnostic.slang, std430 push constant layout: CameraFrameBlock at 0, uint2 at 64, uint at 72, uint at 76
+		// Must match DiagnosticParameters in Diagnostic.slang, std430 push constant layout: CameraFrameBlock at 0, uint2 at 64, then five uints from 72, padded to the block's 16 byte alignment
 		struct DiagnosticParameters
 		{
 			CameraFrameBlock Camera{};
 			uint32_t Width = 0;
 			uint32_t Height = 0;
 			uint32_t Mode = 0;
-			uint32_t Padding = 0;
+			uint32_t PrimitiveCount = 0;
+			uint32_t MaterialCount = 0;
+			uint32_t Padding0 = 0;
+			uint32_t Padding1 = 0;
+			uint32_t Padding2 = 0;
 		};
 
-		static_assert(sizeof(DiagnosticParameters) == 80, "DiagnosticParameters must match the 80 byte push constant block in Diagnostic.slang");
+		static_assert(sizeof(DiagnosticParameters) == 96, "DiagnosticParameters must match the 96 byte push constant block in Diagnostic.slang");
 		static_assert(offsetof(DiagnosticParameters, Camera) == 0, "Camera must sit at std430 offset 0");
 		static_assert(offsetof(DiagnosticParameters, Width) == 64, "Extent.x must sit at std430 offset 64");
 		static_assert(offsetof(DiagnosticParameters, Height) == 68, "Extent.y must sit at std430 offset 68");
 		static_assert(offsetof(DiagnosticParameters, Mode) == 72, "Mode must sit at std430 offset 72");
-		static_assert(offsetof(DiagnosticParameters, Padding) == 76, "Padding must sit at std430 offset 76");
+		static_assert(offsetof(DiagnosticParameters, PrimitiveCount) == 76, "PrimitiveCount must sit at std430 offset 76");
+		static_assert(offsetof(DiagnosticParameters, MaterialCount) == 80, "MaterialCount must sit at std430 offset 80");
+		static_assert(offsetof(DiagnosticParameters, Padding0) == 84, "Padding0 must sit at std430 offset 84");
 
 		std::array<float, 4> ToFloat4(const Math::Vector3& value)
 		{
@@ -284,7 +295,14 @@ namespace Engine
 		l_Frame.FrameSlot = m_VulkanSynchronization->GetFrameIndex();
 		l_Frame.SwapchainGeneration = m_VulkanSwapchain->GetGeneration();
 
-		// 3. Acquire
+		// 3. Extract and upload the scene into this slot's buffers. The slot is retired, and nothing is acquired yet, so a failure here leaves no image outstanding
+		const VkResult l_SceneResult = PrepareSceneResources(request, l_Frame.FrameSlot);
+		if (l_SceneResult != VK_SUCCESS)
+		{
+			return FailFrame(l_Frame, "uploading the scene", l_SceneResult);
+		}
+
+		// 4. Acquire
 		const SwapchainResult l_AcquireResult = m_VulkanSwapchain->AcquireNextImage(m_VulkanSynchronization->GetImageAvailableSemaphore(), m_VulkanSynchronization->GetAcquireFence(), l_Frame.ImageIndex);
 		switch (l_AcquireResult.Status)
 		{
@@ -308,7 +326,7 @@ namespace Engine
 		l_Frame.AcquireStage = FrameRecord::Stage::Acquired;
 		m_VulkanSynchronization->MarkAcquirePending();
 
-		// 4. Record
+		// 5. Record
 		VkCommandBuffer l_CommandBuffer = m_VulkanCommandPool->GetCommandBuffer(l_Frame.FrameSlot);
 
 		const VkResult l_BeginResult = m_VulkanCommandPool->Begin(l_Frame.FrameSlot);
@@ -317,7 +335,7 @@ namespace Engine
 			return FailFrame(l_Frame, "beginning the command buffer", l_BeginResult);
 		}
 
-		const VkResult l_RecordResult = RecordFrame(l_CommandBuffer, l_Frame.ImageIndex, request);
+		const VkResult l_RecordResult = RecordFrame(l_CommandBuffer, l_Frame.ImageIndex, l_Frame.FrameSlot, request);
 		if (l_RecordResult != VK_SUCCESS)
 		{
 			return FailFrame(l_Frame, "recording the frame", l_RecordResult);
@@ -329,7 +347,7 @@ namespace Engine
 			return FailFrame(l_Frame, "ending the command buffer", l_EndResult);
 		}
 
-		// 5. Submit, the frame only counts as in flight once the queue accepted it
+		// 6. Submit, the frame only counts as in flight once the queue accepted it
 		const VkResult l_SubmitResult = m_VulkanSynchronization->Submit(m_VulkanDevice->GetGraphicsQueue(), l_CommandBuffer, l_Frame.ImageIndex, l_Frame.SubmittedTimelineValue);
 		if (l_SubmitResult != VK_SUCCESS)
 		{
@@ -341,7 +359,7 @@ namespace Engine
 		// The slot's frame-local resources are now owned by the GPU until this timeline value is reached
 		m_FrameResources[l_Frame.FrameSlot].SubmittedTimelineValue = l_Frame.SubmittedTimelineValue;
 
-		// 6. Present
+		// 7. Present
 		const SwapchainResult l_PresentResult = m_VulkanSwapchain->Present(m_VulkanDevice->GetGraphicsQueue(), m_VulkanSynchronization->GetRenderFinishedSemaphore(l_Frame.ImageIndex), l_Frame.ImageIndex);
 		switch (l_PresentResult.Status)
 		{
@@ -396,10 +414,11 @@ namespace Engine
 		return RenderOutcome::Fatal;
 	}
 
-	VkResult VulkanRenderer::RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderRequest& request)
+	VkResult VulkanRenderer::RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, uint32_t frameSlot, const RenderRequest& request)
 	{
 		VkImage l_SwapchainImage = m_VulkanSwapchain->GetImage(imageIndex);
 		const VkExtent2D l_Extent = m_HdrImage->GetExtent();
+		const FrameResources& l_Slot = m_FrameResources[frameSlot];
 
 		// 1. The previous frame's tone map fetched the image, the compute write must wait for it and the layout must become GENERAL. Contents are overwritten in full, so the old ones can be discarded regardless of the tracked layout
 		m_HdrImage->RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true);
@@ -419,17 +438,35 @@ namespace Engine
 			.Width = l_Extent.width,
 			.Height = l_Extent.height,
 			.Mode = static_cast<uint32_t>(request.Mode),
-			.Padding = 0,
+			.PrimitiveCount = static_cast<uint32_t>(m_RenderScene.Primitives.size()),
+			.MaterialCount = static_cast<uint32_t>(m_RenderScene.Materials.size()),
+			.Padding0 = 0,
+			.Padding1 = 0,
+			.Padding2 = 0,
 		};
 
-		// 3. Dispatch, the descriptor write goes straight into the command buffer so no descriptor set outlives the recording
+		// 3. Dispatch, the descriptor writes go straight into the command buffer so no descriptor set outlives the recording. The slot's scene buffers were filled by PrepareSceneResources before the acquire
 		const VkDescriptorImageInfo l_OutputImageInfo
 		{
 			.imageView = m_HdrImage->GetView(),
 			.imageLayout = VK_IMAGE_LAYOUT_GENERAL,
 		};
 
-		const std::array<VkWriteDescriptorSet, 1> l_DescriptorWrites
+		const VkDescriptorBufferInfo l_PrimitiveBufferInfo
+		{
+			.buffer = l_Slot.PrimitiveBuffer.GetHandle(),
+			.offset = 0,
+			.range = VK_WHOLE_SIZE,
+		};
+
+		const VkDescriptorBufferInfo l_MaterialBufferInfo
+		{
+			.buffer = l_Slot.MaterialBuffer.GetHandle(),
+			.offset = 0,
+			.range = VK_WHOLE_SIZE,
+		};
+
+		const std::array<VkWriteDescriptorSet, 3> l_DescriptorWrites
 		{ {
 			{
 				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -437,6 +474,20 @@ namespace Engine
 				.descriptorCount = 1,
 				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 				.pImageInfo = &l_OutputImageInfo,
+			},
+			{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstBinding = 1,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.pBufferInfo = &l_PrimitiveBufferInfo,
+			},
+			{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstBinding = 2,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.pBufferInfo = &l_MaterialBufferInfo,
 			},
 		} };
 
@@ -562,7 +613,7 @@ namespace Engine
 			return l_Result;
 		}
 
-		const std::array<VkDescriptorSetLayoutBinding, 1> l_Bindings
+		const std::array<VkDescriptorSetLayoutBinding, 3> l_Bindings
 		{ {
 			{
 				.binding = 0,
@@ -570,9 +621,21 @@ namespace Engine
 				.descriptorCount = 1,
 				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 			},
+			{
+				.binding = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+			},
+			{
+				.binding = 2,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+			},
 		} };
 
-		// The camera block is small enough to push per dispatch, so the pass owns no frame-local buffers
+		// The camera block and the record counts are small enough to push per dispatch, the records themselves live in the per-slot scene buffers
 		const std::array<VkPushConstantRange, 1> l_PushConstantRanges
 		{ {
 			{
@@ -732,6 +795,89 @@ namespace Engine
 		}
 	}
 
+	VkResult VulkanRenderer::PrepareSceneResources(const RenderRequest& request, uint32_t frameSlot)
+	{
+		// 1. Re-extract when the client's scene changed. Revisions come from one process-wide counter, so a swapped scene is a new revision too, and a null scene is the empty revision 0
+		const uint64_t l_Revision = request.ActiveScene != nullptr ? request.ActiveScene->GetRadianceRevision() : 0;
+		if (m_RenderScene.Revision != l_Revision)
+		{
+			if (request.ActiveScene != nullptr)
+			{
+				BuildRenderScene(*request.ActiveScene, m_RenderScene);
+			}
+			else
+			{
+				m_RenderScene = RenderScene{};
+			}
+		}
+
+		// 2. Upload into this slot's buffers when they hold an older revision. WaitForFrame retired the slot's previous submission, so replacing or rewriting them cannot race the GPU
+		FrameResources& l_Slot = m_FrameResources[frameSlot];
+		if (l_Slot.UploadedRevision == m_RenderScene.Revision && l_Slot.PrimitiveBuffer.IsInitialized() && l_Slot.MaterialBuffer.IsInitialized())
+		{
+			return VK_SUCCESS;
+		}
+
+		VkResult l_Result = UploadSceneBuffer(l_Slot.PrimitiveBuffer, m_RenderScene.Primitives.data(), m_RenderScene.Primitives.size() * sizeof(RenderPrimitiveRecord), sizeof(RenderPrimitiveRecord), "scene primitives");
+		if (l_Result != VK_SUCCESS)
+		{
+			return l_Result;
+		}
+
+		l_Result = UploadSceneBuffer(l_Slot.MaterialBuffer, m_RenderScene.Materials.data(), m_RenderScene.Materials.size() * sizeof(RenderMaterialRecord), sizeof(RenderMaterialRecord), "scene materials");
+		if (l_Result != VK_SUCCESS)
+		{
+			return l_Result;
+		}
+
+		l_Slot.UploadedRevision = m_RenderScene.Revision;
+
+		return VK_SUCCESS;
+	}
+
+	VkResult VulkanRenderer::UploadSceneBuffer(VulkanBuffer& buffer, const void* data, VkDeviceSize size, VkDeviceSize minimumSize, const char* debugName)
+	{
+		// A bound storage buffer needs a non-zero size even for an empty scene, and growth allocates headroom so a run of additions does not recreate the buffer every frame
+		const VkDeviceSize l_Required = std::max(size, minimumSize);
+		if (!buffer.IsInitialized() || buffer.GetSize() < l_Required)
+		{
+			buffer.Shutdown();
+
+			const VulkanBufferSpecification l_Specification
+			{
+				.Size = l_Required * 2,
+				.Usage = k_SceneBufferUsage,
+				.Memory = BufferMemory::HostUpload,
+				.DebugName = debugName,
+			};
+
+			const VkResult l_Result = buffer.Initialize(*m_VulkanMemoryAllocator, l_Specification);
+			if (l_Result != VK_SUCCESS)
+			{
+				return l_Result;
+			}
+		}
+
+		if (size == 0)
+		{
+			return VK_SUCCESS;
+		}
+
+		return buffer.Upload(data, size);
+	}
+
+	void VulkanRenderer::DestroySceneResources()
+	{
+		for (FrameResources& l_FrameResources : m_FrameResources)
+		{
+			l_FrameResources.PrimitiveBuffer.Shutdown();
+			l_FrameResources.MaterialBuffer.Shutdown();
+			l_FrameResources.UploadedRevision = 0;
+		}
+
+		m_RenderScene = RenderScene{};
+	}
+
 	void VulkanRenderer::OnFramebufferResized()
 	{
 		if (m_VulkanSwapchain)
@@ -759,6 +905,7 @@ namespace Engine
 			l_FrameResources.SubmittedTimelineValue = 0;
 		}
 
+		DestroySceneResources();
 		DestroyToneMapResources();
 		DestroyDiagnosticResources();
 

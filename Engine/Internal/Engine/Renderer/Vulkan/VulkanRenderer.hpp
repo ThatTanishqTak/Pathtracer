@@ -5,6 +5,8 @@
 #endif
 
 #include "Engine/Renderer/Renderer.hpp"
+#include "Engine/Renderer/RenderScene.hpp"
+#include "Engine/Renderer/Vulkan/VulkanBuffer.hpp"
 #include "Engine/Renderer/Vulkan/VulkanSynchronization.hpp"
 
 #include <volk.h>
@@ -63,10 +65,14 @@ namespace Engine
 			Stage AcquireStage = Stage::None;
 		};
 
-		// The diagnostic pass pushes its parameters, so a slot only remembers the timeline value its last submission signals
+		// Each slot owns the scene records its submissions read, rewritten only after WaitForFrame retired the slot's previous submission
 		struct FrameResources
 		{
 			uint64_t SubmittedTimelineValue = 0;
+
+			VulkanBuffer PrimitiveBuffer;
+			VulkanBuffer MaterialBuffer;
+			uint64_t UploadedRevision = 0; // The RenderScene::Revision the buffers hold
 		};
 
 		void InitializeVolk();
@@ -79,7 +85,11 @@ namespace Engine
 		VkResult CreateToneMapResources();
 		void DestroyToneMapResources();
 
-		VkResult RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderRequest& request);
+		VkResult PrepareSceneResources(const RenderRequest& request, uint32_t frameSlot);
+		VkResult UploadSceneBuffer(VulkanBuffer& buffer, const void* data, VkDeviceSize size, VkDeviceSize minimumSize, const char* debugName);
+		void DestroySceneResources();
+
+		VkResult RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, uint32_t frameSlot, const RenderRequest& request);
 
 		RenderOutcome FailFrame(const FrameRecord& frame, const char* stage, VkResult result);
 
@@ -95,6 +105,7 @@ namespace Engine
 		std::unique_ptr<VulkanImage> m_HdrImage;
 		std::unique_ptr<VulkanComputePipeline> m_ToneMapPipeline;
 		std::array<FrameResources, VulkanSynchronization::k_MaxFramesInFlight> m_FrameResources;
+		RenderScene m_RenderScene; // The packed records of the last extracted revision, the client's Scene itself is never kept
 
 		bool m_VolkInitialized = false;
 		bool m_Fatal = false;

@@ -8,3 +8,7 @@
 #include "Engine/Math/Math.hpp"
 #include "Engine/Renderer/RenderRequest.hpp"
 #include "Engine/Scene/Camera.hpp"
+#include "Engine/Scene/Components.hpp"
+#include "Engine/Scene/Entity.hpp"
+#include "Engine/Scene/Material.hpp"
+#include "Engine/Scene/Scene.hpp"

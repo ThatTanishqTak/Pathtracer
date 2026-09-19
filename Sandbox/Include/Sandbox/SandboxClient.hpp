@@ -18,9 +18,16 @@ namespace Sandbox
 	private:
 		void UpdateCamera(const Engine::FrameTime& time);
 
+		void BuildDemoScene();
+		void CreateSphere();
+		void DestroySelected();
+		void SelectNext();
+		void MoveSelected(const Engine::Math::Vector3& delta);
+		void RecolorSelected();
+
 		Engine::ApplicationServices* m_Services = nullptr;
 
-		// Throwaway turntable around the diagnostic sphere, Step 8 replaces it with the first-person controller
+		// Throwaway turntable around the scene origin, Step 8 replaces it with the first-person controller
 		static constexpr float k_OrbitRadius = 4.0f;
 		static constexpr float k_OrbitElevation = Engine::Math::ToRadians(20.0f);
 		static constexpr float k_OrbitSpeed = 0.4f; // Radians per second
@@ -32,6 +39,17 @@ namespace Sandbox
 		// Exposure is stepped in photographic stops and converted to a linear scale for the render request
 		static constexpr float k_ExposureStepStops = 0.5f;
 		static constexpr float k_ExposureRangeStops = 8.0f;
+
+		// Scene editing keys, enough to exercise create, move, recolour and delete against the uploaded records
+		static constexpr float k_MoveStep = 0.25f; // Metres per key press
+		static constexpr float k_CreatedSphereRadius = 0.4f;
+		static constexpr float k_CreatedSphereRing = 2.5f; // Distance from the origin new spheres appear at
+
+		// The client owns the scene, the renderer only sees it through the render request
+		Engine::Scene m_Scene;
+		Engine::EntityId m_SelectedEntity = Engine::EntityId::Invalid;
+		uint32_t m_CreatedSpheres = 0;
+		uint32_t m_PaletteIndex = 0;
 
 		Engine::Camera m_Camera;
 		Engine::DiagnosticMode m_Mode = Engine::DiagnosticMode::RayDirection;
