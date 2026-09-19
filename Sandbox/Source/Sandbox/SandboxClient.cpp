@@ -64,7 +64,8 @@ namespace Sandbox
 		m_Services = &services;
 
 		PT_APP_INFO("Sandbox client started, {}x{} window, {}x{} framebuffer", m_Services->GetWindowWidth(), m_Services->GetWindowHeight(), m_Services->GetFramebufferWidth(), m_Services->GetFramebufferHeight());
-		PT_APP_INFO("Controls: 1-5 select a diagnostic view, 6 the path tracer, P pauses the orbit so the image converges, B cycles the bounce limit, R cycles the render scale, LeftBracket and RightBracket step the field of view, Equals and Minus step exposure, Tab toggles mouse capture, Escape closes");
+		PT_APP_INFO("Controls: click captures the mouse and looks around, W A S D walk, Shift runs, Escape releases the mouse and closes when it is already released, standing still lets the image converge");
+		PT_APP_INFO("Render: 1-5 select a diagnostic view, 6 the path tracer, B cycles the bounce limit, R cycles the render scale, Equals and Minus step exposure");
 		PT_APP_INFO("Scene: N creates a sphere, Backspace deletes the selected entity, Period selects the next entity, arrows move the selection on X and Z, PageUp and PageDown on Y, C recolours its material");
 
 		if (!RunCameraChecks())
@@ -78,9 +79,9 @@ namespace Sandbox
 		m_Settings.MaxBounces = k_BounceLimits[m_BounceLimitIndex];
 		m_Settings.Seed = 0;
 
-		// Fill the camera once now so it is complete before the first Update, a zero step leaves the orbit where it starts
-		m_Camera.VerticalFieldOfView = Engine::Math::ToRadians(60.0f);
-		UpdateCamera(Engine::FrameTime{});
+		// The player spawn is scene content, the controller reads it once and owns the camera from here on
+		m_Controller.SetVerticalFieldOfView(k_VerticalFieldOfView);
+		m_Controller.Reset(m_Scene.GetPlayerSpawn());
 	}
 
 	void SandboxClient::OnStop() noexcept
@@ -132,7 +133,8 @@ namespace Sandbox
 
 	void SandboxClient::Update(const Engine::FrameTime& time, const Engine::InputState& input)
 	{
-		if (input.WasKeyPressed(Engine::Key::Escape))
+		// Escape while captured belongs to the controller, which releases the mouse, so the same press never also closes
+		if (input.WasKeyPressed(Engine::Key::Escape) && !input.MouseCaptured)
 		{
 			m_Services->RequestClose();
 		}
@@ -147,13 +149,6 @@ namespace Sandbox
 
 				PT_APP_INFO("Render mode {}: {}", i_Mode + 1, ModeName(m_Mode));
 			}
-		}
-
-		if (input.WasKeyPressed(Engine::Key::P))
-		{
-			m_OrbitPaused = !m_OrbitPaused;
-
-			PT_APP_INFO("Orbit {}", m_OrbitPaused ? "paused, the path tracer accumulates" : "running");
 		}
 
 		// A new bounce limit restarts the accumulation, a new render scale recreates the view images
@@ -172,27 +167,12 @@ namespace Sandbox
 			PT_APP_INFO("Render scale {:.2f}", k_RenderScales[m_RenderScaleIndex]);
 		}
 
-		if (input.WasKeyPressed(Engine::Key::LeftBracket) || input.WasKeyPressed(Engine::Key::RightBracket))
-		{
-			const float l_Direction = input.WasKeyPressed(Engine::Key::RightBracket) ? 1.0f : -1.0f;
-			m_Camera.VerticalFieldOfView = std::clamp(m_Camera.VerticalFieldOfView + l_Direction * k_FieldOfViewStep, k_MinFieldOfView, k_MaxFieldOfView);
-
-			PT_APP_INFO("Vertical field of view {:.0f} degrees", Engine::Math::ToDegrees(m_Camera.VerticalFieldOfView));
-		}
-
 		if (input.WasKeyPressed(Engine::Key::Equals) || input.WasKeyPressed(Engine::Key::Minus))
 		{
 			const float l_Direction = input.WasKeyPressed(Engine::Key::Equals) ? 1.0f : -1.0f;
 			m_ExposureStops = std::clamp(m_ExposureStops + l_Direction * k_ExposureStepStops, -k_ExposureRangeStops, k_ExposureRangeStops);
 
 			PT_APP_INFO("Exposure {:+.1f} stops ({:.3f}x)", m_ExposureStops, std::exp2(m_ExposureStops));
-		}
-
-		if (input.WasKeyPressed(Engine::Key::Tab))
-		{
-			m_Services->SetMouseCaptured(!m_Services->IsMouseCaptured());
-
-			PT_APP_TRACE("Mouse capture {}", m_Services->IsMouseCaptured() ? "on" : "off");
 		}
 
 		// Scene edits, every one goes through the Scene so the renderer sees a new radiance revision
@@ -230,13 +210,8 @@ namespace Sandbox
 			MoveSelected(l_Delta);
 		}
 
-		// Held state only reads while the window has focus, which the host guarantees by clearing it on focus loss
-		if (input.IsKeyDown(Engine::Key::W) || input.IsKeyDown(Engine::Key::A) || input.IsKeyDown(Engine::Key::S) || input.IsKeyDown(Engine::Key::D))
-		{
-			PT_APP_TRACE("Movement keys held for {:.4f}s", time.DeltaSeconds);
-		}
-
-		UpdateCamera(time);
+		// Look and walk from this frame's snapshot, every camera change restarts the accumulation through the render view key
+		m_Controller.Update(time, input, *m_Services);
 
 		m_StatisticsElapsed += time.ElapsedSeconds;
 		m_StatisticsFrames += 1;
@@ -249,29 +224,16 @@ namespace Sandbox
 
 			const Engine::RenderRequest l_Request = GetRenderRequest();
 
-			PT_APP_TRACE("Frame {}: {} frames in {:.2f}s, {:.2f} ms average, focus {}, capture {}, mouse delta ({:.1f}, {:.1f}), mode {}, camera ({:.2f}, {:.2f}, {:.2f}), view {}x{} at scale {:.2f}, {} bounces, {} entities, {} materials, scene revision {}, selected {}", time.FrameIndex, m_StatisticsFrames, m_StatisticsElapsed, l_AverageMilliseconds, input.HasFocus, input.MouseCaptured, m_StatisticsMouseDeltaX, m_StatisticsMouseDeltaY, ModeName(m_Mode), m_Camera.Position.x, m_Camera.Position.y, m_Camera.Position.z, l_Request.View.Width, l_Request.View.Height, k_RenderScales[m_RenderScaleIndex], m_Settings.MaxBounces, m_Scene.GetEntities().size(), m_Scene.GetMaterials().size(), m_Scene.GetRadianceRevision(), std::to_underlying(m_SelectedEntity));
+			const Engine::Camera& l_Camera = m_Controller.GetCamera();
+			const Engine::YawPitch& l_Angles = m_Controller.GetAngles();
+
+			PT_APP_TRACE("Frame {}: {} frames in {:.2f}s, {:.2f} ms average, focus {}, capture {}, mouse delta ({:.1f}, {:.1f}), mode {}, camera ({:.2f}, {:.2f}, {:.2f}) yaw {:.1f} pitch {:.1f}, view {}x{} at scale {:.2f}, {} bounces, {} entities, {} materials, scene revision {}, selected {}", time.FrameIndex, m_StatisticsFrames, m_StatisticsElapsed, l_AverageMilliseconds, input.HasFocus, input.MouseCaptured, m_StatisticsMouseDeltaX, m_StatisticsMouseDeltaY, ModeName(m_Mode), l_Camera.Position.x, l_Camera.Position.y, l_Camera.Position.z, Engine::Math::ToDegrees(l_Angles.Yaw), Engine::Math::ToDegrees(l_Angles.Pitch), l_Request.View.Width, l_Request.View.Height, k_RenderScales[m_RenderScaleIndex], m_Settings.MaxBounces, m_Scene.GetEntities().size(), m_Scene.GetMaterials().size(), m_Scene.GetRadianceRevision(), std::to_underlying(m_SelectedEntity));
 
 			m_StatisticsElapsed = 0.0f;
 			m_StatisticsFrames = 0;
 			m_StatisticsMouseDeltaX = 0.0f;
 			m_StatisticsMouseDeltaY = 0.0f;
 		}
-	}
-
-	void SandboxClient::UpdateCamera(const Engine::FrameTime& time)
-	{
-		// The clamped simulation step drives the orbit, so a long stall moves the camera by at most one clamped step
-		if (!m_OrbitPaused)
-		{
-			m_OrbitAngle = std::fmod(m_OrbitAngle + k_OrbitSpeed * time.DeltaSeconds, Engine::Math::k_TwoPi);
-		}
-
-		// Circle the scene origin, slightly above it, always looking at the centre sphere
-		const float l_Horizontal = k_OrbitRadius * std::cos(k_OrbitElevation);
-		m_Camera.Position = Engine::Math::Vector3(l_Horizontal * std::sin(m_OrbitAngle), k_OrbitRadius * std::sin(k_OrbitElevation), l_Horizontal * std::cos(m_OrbitAngle));
-		m_Camera.Orientation = Engine::LookAtOrientation(m_Camera.Position, Engine::Math::Vector3(0.0f, 0.0f, 0.0f));
-
-		// The view owns the render extent, the renderer copies it into the camera so the aspect ratio always follows the view
 	}
 
 	void SandboxClient::BuildDemoScene()
@@ -352,7 +314,7 @@ namespace Sandbox
 			l_Entity.Material = l_LightMaterial;
 		}
 
-		// Scene content the Step 8 controller starts from, distinct from the orbit camera above
+		// Scene content, not workspace state: the first-person controller starts here and the Editor camera never writes it
 		m_Scene.GetPlayerSpawn().Position = Engine::Math::Vector3(0.0f, 0.5f, 6.0f);
 		m_Scene.GetPlayerSpawn().Orientation = Engine::Math::k_IdentityRotation;
 		m_Scene.GetEnvironment().Radiance = Engine::Math::Vector3(0.05f, 0.07f, 0.1f);
@@ -496,7 +458,7 @@ namespace Sandbox
 		Engine::RenderRequest l_Request;
 		l_Request.View.Width = std::max(static_cast<uint32_t>(l_FramebufferWidth * l_Scale), 1u);
 		l_Request.View.Height = std::max(static_cast<uint32_t>(l_FramebufferHeight * l_Scale), 1u);
-		l_Request.View.ActiveCamera = m_Camera;
+		l_Request.View.ActiveCamera = m_Controller.GetCamera();
 		l_Request.View.Settings = m_Settings;
 		l_Request.View.Mode = m_Mode;
 		l_Request.ActiveScene = &m_Scene;

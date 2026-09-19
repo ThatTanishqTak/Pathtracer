@@ -165,4 +165,24 @@ namespace Engine
 
 		return glm::quatLookAtRH(l_Direction, l_Up);
 	}
+
+	Math::Quaternion OrientationFromYawPitch(const YawPitch& angles)
+	{
+		return glm::normalize(glm::angleAxis(angles.Yaw, Math::k_Up) * glm::angleAxis(angles.Pitch, Math::k_Right));
+	}
+
+	YawPitch YawPitchFromOrientation(const Math::Quaternion& orientation)
+	{
+		const Math::Quaternion l_Orientation = SafeOrientation(orientation);
+
+		// The pitch turns about the right axis, so the right axis stays horizontal and carries the yaw alone, even when the camera looks straight up where the forward axis has no heading
+		const Math::Vector3 l_Right = l_Orientation * Math::k_Right;
+		const Math::Vector3 l_Forward = l_Orientation * Math::k_Forward;
+
+		YawPitch l_Angles;
+		l_Angles.Yaw = std::atan2(0.0f - l_Right.z, l_Right.x); // 0 - z rather than -z so an unrotated heading is +0, not -0
+		l_Angles.Pitch = std::asin(std::clamp(l_Forward.y, -1.0f, 1.0f));
+
+		return l_Angles;
+	}
 }

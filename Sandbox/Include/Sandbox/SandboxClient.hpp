@@ -2,6 +2,8 @@
 
 #include "Engine/Engine.hpp"
 
+#include "Sandbox/FirstPersonController.hpp"
+
 #include <cstdint>
 
 namespace Sandbox
@@ -16,8 +18,6 @@ namespace Sandbox
 		Engine::RenderRequest GetRenderRequest() const override;
 
 	private:
-		void UpdateCamera(const Engine::FrameTime& time);
-
 		void BuildDemoScene();
 		void CreateSphere();
 		void DestroySelected();
@@ -27,14 +27,8 @@ namespace Sandbox
 
 		Engine::ApplicationServices* m_Services = nullptr;
 
-		// Throwaway turntable around the scene origin, Step 8 replaces it with the first-person controller
-		static constexpr float k_OrbitRadius = 4.0f;
-		static constexpr float k_OrbitElevation = Engine::Math::ToRadians(20.0f);
-		static constexpr float k_OrbitSpeed = 0.4f; // Radians per second
-
-		static constexpr float k_FieldOfViewStep = Engine::Math::ToRadians(5.0f);
-		static constexpr float k_MinFieldOfView = Engine::Math::ToRadians(10.0f);
-		static constexpr float k_MaxFieldOfView = Engine::Math::ToRadians(150.0f);
+		// The controller owns the camera, the client only chooses the lens
+		static constexpr float k_VerticalFieldOfView = Engine::Math::ToRadians(60.0f);
 
 		// Exposure is stepped in photographic stops and converted to a linear scale for the render request
 		static constexpr float k_ExposureStepStops = 0.5f;
@@ -59,13 +53,13 @@ namespace Sandbox
 		uint32_t m_CreatedSpheres = 0;
 		uint32_t m_PaletteIndex = 0;
 
-		Engine::Camera m_Camera;
+		// Provisional first-person navigation, starts at the scene's player spawn
+		FirstPersonController m_Controller;
+
 		Engine::DiagnosticMode m_Mode = Engine::DiagnosticMode::PathTraced;
 		Engine::RenderSettings m_Settings;
 		uint32_t m_RenderScaleIndex = 0;
 		uint32_t m_BounceLimitIndex = 3;
-		float m_OrbitAngle = 0.0f;
-		bool m_OrbitPaused = false;
 		float m_ExposureStops = 0.0f;
 		float m_StatisticsElapsed = 0.0f;
 		uint32_t m_StatisticsFrames = 0;

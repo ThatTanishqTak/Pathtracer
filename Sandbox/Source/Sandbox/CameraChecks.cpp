@@ -164,7 +164,7 @@ namespace Sandbox
 			l_AllPassed = Check(!ProjectPoint(l_Camera, Vector3(0.0f, 0.0f, 10.0f), l_Pixel, l_Depth), "points behind the camera are rejected by ProjectPoint") && l_AllPassed;
 		}
 
-		// 8. The look-at orientation used by the Sandbox turntable faces the sphere, and the centre ray reaches it at the expected distance
+		// 8. The look-at orientation faces the sphere, and the centre ray reaches it at the expected distance
 		{
 			Camera l_Camera = MakeCamera(640, 480, 60.0f);
 			l_Camera.Position = Vector3(0.0f, 0.0f, 4.0f);
@@ -189,6 +189,40 @@ namespace Sandbox
 			const Ray l_Ray = GenerateCameraRay(l_Camera, 0.5f, 0.5f);
 
 			l_AllPassed = Check(!IsCameraValid(l_Camera) && Math::IsFinite(l_Ray.Direction) && Math::NearlyEqual(glm::length(l_Ray.Direction), 1.0f), "invalid cameras are reported and still yield a finite unit ray") && l_AllPassed;
+		}
+
+		// 10. The yaw/pitch composition the controller builds matches the hand-written orientation of check 6 and survives a round trip through the angles
+		{
+			const YawPitch l_Angles{ .Yaw = Math::ToRadians(30.0f), .Pitch = Math::ToRadians(-15.0f) };
+
+			Camera l_Expected = MakeCamera(100, 100, 60.0f);
+			l_Expected.Orientation = glm::angleAxis(Math::ToRadians(30.0f), Math::k_Up) * glm::angleAxis(Math::ToRadians(-15.0f), Math::k_Right);
+
+			Camera l_Built = l_Expected;
+			l_Built.Orientation = OrientationFromYawPitch(l_Angles);
+
+			// q and -q are the same rotation, so the frames are compared rather than the components
+			const CameraBasis l_ExpectedBasis = GetCameraBasis(l_Expected);
+			const CameraBasis l_BuiltBasis = GetCameraBasis(l_Built);
+			const YawPitch l_RoundTrip = YawPitchFromOrientation(l_Built.Orientation);
+
+			const bool l_SameFrame = Near(l_ExpectedBasis.Forward, l_BuiltBasis.Forward) && Near(l_ExpectedBasis.Up, l_BuiltBasis.Up) && Near(l_ExpectedBasis.Right, l_BuiltBasis.Right);
+			const bool l_SameAngles = Math::NearlyEqual(l_RoundTrip.Yaw, l_Angles.Yaw) && Math::NearlyEqual(l_RoundTrip.Pitch, l_Angles.Pitch);
+
+			l_AllPassed = Check(l_SameFrame && l_SameAngles, "yaw/pitch orientation matches the explicit composition and round-trips") && l_AllPassed;
+		}
+
+		// 11. Headings the controller starts from: identity is zero and zero, a +90 degree yaw faces -X, and a straight-up pitch still reports its yaw
+		{
+			const YawPitch l_Identity = YawPitchFromOrientation(Math::k_IdentityRotation);
+			const YawPitch l_Left = YawPitchFromOrientation(glm::angleAxis(Math::k_HalfPi, Math::k_Up));
+			const YawPitch l_Up = YawPitchFromOrientation(OrientationFromYawPitch(YawPitch{ .Yaw = Math::ToRadians(45.0f), .Pitch = Math::k_HalfPi }));
+
+			const bool l_IdentityZero = Math::NearlyEqual(l_Identity.Yaw, 0.0f) && Math::NearlyEqual(l_Identity.Pitch, 0.0f);
+			const bool l_LeftQuarter = Math::NearlyEqual(l_Left.Yaw, Math::k_HalfPi) && Math::NearlyEqual(l_Left.Pitch, 0.0f);
+			const bool l_UpKeepsYaw = Math::NearlyEqual(l_Up.Yaw, Math::ToRadians(45.0f), 1e-3f) && Math::NearlyEqual(l_Up.Pitch, Math::k_HalfPi, 1e-3f);
+
+			l_AllPassed = Check(l_IdentityZero && l_LeftQuarter && l_UpKeepsYaw, "spawn headings decompose into the expected yaw and pitch, including straight up") && l_AllPassed;
 		}
 
 		if (l_AllPassed)
