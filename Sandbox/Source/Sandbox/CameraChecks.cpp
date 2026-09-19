@@ -42,7 +42,7 @@ namespace Sandbox
 			return l_Camera;
 		}
 
-		// CPU twin of IntersectSphere in Diagnostic.slang for the unit sphere at the origin, negative on a miss
+		// CPU twin of IntersectUnitSphere in Modules/Intersection.slang for the unit sphere at the origin with a zero minimum distance, negative on a miss
 		float IntersectUnitSphere(const Engine::Ray& ray)
 		{
 			const float l_B = glm::dot(ray.Origin, ray.Direction);

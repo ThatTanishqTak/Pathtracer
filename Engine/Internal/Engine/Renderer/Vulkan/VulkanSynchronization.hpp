@@ -6,6 +6,7 @@
 
 #include <volk.h>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -33,6 +34,7 @@ namespace Engine
 		bool IsInitialized() const { return m_TimelineSemaphore != VK_NULL_HANDLE; }
 
 		VkResult WaitForFrame();
+		VkResult SubmitCompute(VkQueue queue, VkCommandBuffer commandBuffer, uint64_t& submittedValue);
 		VkResult Submit(VkQueue queue, VkCommandBuffer commandBuffer, uint32_t imageIndex, uint64_t& submittedValue);
 		VkResult WaitForAllFrames();
 
@@ -47,6 +49,7 @@ namespace Engine
 		VkSemaphore GetRenderFinishedSemaphore(uint32_t imageIndex) const;
 		VkSemaphore GetTimelineSemaphore() const { return m_TimelineSemaphore; }
 		uint64_t GetSubmittedFrameCount() const { return m_SubmittedFrameCount; }
+		uint64_t GetSubmittedTimelineValue() const { return m_TimelineValue; }
 
 	private:
 		VkResult CreateTimelineSemaphore();
@@ -67,8 +70,11 @@ namespace Engine
 		const VulkanSwapchain* m_Swapchain = nullptr;
 
 		VkSemaphore m_TimelineSemaphore = VK_NULL_HANDLE;
-		uint64_t m_SubmittedFrameCount = 0;
+		uint64_t m_TimelineValue = 0; // The last value a batch signals, every batch takes the next one
+		uint64_t m_SubmittedFrameCount = 0; // Present batches, the frame slot follows this
 		uint64_t m_SwapchainGeneration = 0;
+
+		std::array<uint64_t, k_MaxFramesInFlight> m_SlotTimelineValues{}; // The last value signalled by a batch recorded on each slot, zero until the slot submits
 
 		std::vector<VkSemaphore> m_ImageAvailableSemaphores;
 		std::vector<VkFence> m_AcquireFences;

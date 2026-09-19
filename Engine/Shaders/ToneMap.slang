@@ -1,12 +1,15 @@
-// Must match ToneMapParameters in VulkanRenderer.cpp, std430 push constant layout: uint2 at 0, float at 8, float at 12
+// Must match ToneMapParameters in VulkanRenderer.cpp, std430 push constant layout: uint2 at 0, uint2 at 8, float at 16, three floats of padding to 32
 struct ToneMapParameters
 {
-	uint2 Extent;
+	uint2 InputExtent; // The view's output image
+	uint2 OutputExtent; // The swapchain image
 	float Exposure;
-	float Padding;
+	float Padding0;
+	float Padding1;
+	float Padding2;
 };
 
-// Binding 0: the linear scene color the diagnostic pass wrote, fetched by texel so a same-size pass needs no sampler
+// Binding 0: the linear scene color the view wrote, fetched by texel at the nearest source pixel so no sampler is needed when the two extents differ
 [[vk::binding(0, 0)]]
 Texture2D<float4> u_Input;
 
@@ -49,13 +52,16 @@ void computeMain(uint3 threadId : SV_DispatchThreadID)
 {
 	const uint2 l_Pixel = threadId.xy;
 
-	// The dispatch rounds up to whole workgroups, the C++ side verified both images have this extent
-	if (l_Pixel.x >= u_Parameters.Extent.x || l_Pixel.y >= u_Parameters.Extent.y)
+	// The dispatch rounds up to whole workgroups, the C++ side verified the swapchain image has this extent
+	if (l_Pixel.x >= u_Parameters.OutputExtent.x || l_Pixel.y >= u_Parameters.OutputExtent.y)
 	{
 		return;
 	}
 
-	const float3 l_Linear = u_Input.Load(int3(int2(l_Pixel), 0)).rgb;
+	// Nearest source pixel, the view renders at its own resolution and the window shows it stretched until Step 10 gives the Editor a sampled display texture
+	const uint2 l_Source = min((l_Pixel * u_Parameters.InputExtent) / u_Parameters.OutputExtent, u_Parameters.InputExtent - uint2(1, 1));
+
+	const float3 l_Linear = u_Input.Load(int3(int2(l_Source), 0)).rgb;
 
 	// Exposure is a linear scene-light scale applied before the curve
 	const float3 l_Display = ToneMapACES(l_Linear * u_Parameters.Exposure);

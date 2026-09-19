@@ -45,6 +45,14 @@ namespace Sandbox
 		static constexpr float k_CreatedSphereRadius = 0.4f;
 		static constexpr float k_CreatedSphereRing = 2.5f; // Distance from the origin new spheres appear at
 
+		// The view renders at the framebuffer size times this scale, so the render extent can differ from the window
+		static constexpr uint32_t k_RenderScaleCount = 3;
+		static constexpr float k_RenderScales[k_RenderScaleCount] = { 1.0f, 0.5f, 0.25f };
+
+		// Bounce limits the B key cycles through, zero shows emitters and the environment only
+		static constexpr uint32_t k_BounceLimitCount = 5;
+		static constexpr uint32_t k_BounceLimits[k_BounceLimitCount] = { 0, 1, 2, 4, 8 };
+
 		// The client owns the scene, the renderer only sees it through the render request
 		Engine::Scene m_Scene;
 		Engine::EntityId m_SelectedEntity = Engine::EntityId::Invalid;
@@ -52,7 +60,10 @@ namespace Sandbox
 		uint32_t m_PaletteIndex = 0;
 
 		Engine::Camera m_Camera;
-		Engine::DiagnosticMode m_Mode = Engine::DiagnosticMode::RayDirection;
+		Engine::DiagnosticMode m_Mode = Engine::DiagnosticMode::PathTraced;
+		Engine::RenderSettings m_Settings;
+		uint32_t m_RenderScaleIndex = 0;
+		uint32_t m_BounceLimitIndex = 3;
 		float m_OrbitAngle = 0.0f;
 		bool m_OrbitPaused = false;
 		float m_ExposureStops = 0.0f;

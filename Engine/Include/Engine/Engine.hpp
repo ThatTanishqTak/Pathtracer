@@ -7,6 +7,7 @@
 #include "Engine/Input/Input.hpp"
 #include "Engine/Math/Math.hpp"
 #include "Engine/Renderer/RenderRequest.hpp"
+#include "Engine/Renderer/RenderView.hpp"
 #include "Engine/Scene/Camera.hpp"
 #include "Engine/Scene/Components.hpp"
 #include "Engine/Scene/Entity.hpp"

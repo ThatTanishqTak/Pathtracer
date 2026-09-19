@@ -36,6 +36,10 @@ namespace Sandbox
 				{
 					return "base colour";
 				}
+				case Engine::DiagnosticMode::PathTraced:
+				{
+					return "path traced";
+				}
 				default:
 				{
 					return "unknown";
@@ -60,7 +64,7 @@ namespace Sandbox
 		m_Services = &services;
 
 		PT_APP_INFO("Sandbox client started, {}x{} window, {}x{} framebuffer", m_Services->GetWindowWidth(), m_Services->GetWindowHeight(), m_Services->GetFramebufferWidth(), m_Services->GetFramebufferHeight());
-		PT_APP_INFO("Controls: 1-5 select the diagnostic mode, P pauses the orbit, LeftBracket and RightBracket step the field of view, Equals and Minus step exposure, Tab toggles mouse capture, Escape closes");
+		PT_APP_INFO("Controls: 1-5 select a diagnostic view, 6 the path tracer, P pauses the orbit so the image converges, B cycles the bounce limit, R cycles the render scale, LeftBracket and RightBracket step the field of view, Equals and Minus step exposure, Tab toggles mouse capture, Escape closes");
 		PT_APP_INFO("Scene: N creates a sphere, Backspace deletes the selected entity, Period selects the next entity, arrows move the selection on X and Z, PageUp and PageDown on Y, C recolours its material");
 
 		if (!RunCameraChecks())
@@ -69,6 +73,10 @@ namespace Sandbox
 		}
 
 		BuildDemoScene();
+
+		m_Settings.SamplesPerFrame = 1;
+		m_Settings.MaxBounces = k_BounceLimits[m_BounceLimitIndex];
+		m_Settings.Seed = 0;
 
 		// Fill the camera once now so it is complete before the first Update, a zero step leaves the orbit where it starts
 		m_Camera.VerticalFieldOfView = Engine::Math::ToRadians(60.0f);
@@ -129,15 +137,15 @@ namespace Sandbox
 			m_Services->RequestClose();
 		}
 
-		// Number keys select the diagnostic view, the values line up with DiagnosticMode
-		const Engine::Key k_ModeKeys[] = { Engine::Key::Number1, Engine::Key::Number2, Engine::Key::Number3, Engine::Key::Number4, Engine::Key::Number5 };
-		for (uint32_t i_Mode = 0; i_Mode < 5; ++i_Mode)
+		// Number keys select the view, the values line up with DiagnosticMode and 6 is the path tracer
+		const Engine::Key k_ModeKeys[] = { Engine::Key::Number1, Engine::Key::Number2, Engine::Key::Number3, Engine::Key::Number4, Engine::Key::Number5, Engine::Key::Number6 };
+		for (uint32_t i_Mode = 0; i_Mode < 6; ++i_Mode)
 		{
 			if (input.WasKeyPressed(k_ModeKeys[i_Mode]))
 			{
 				m_Mode = static_cast<Engine::DiagnosticMode>(i_Mode);
 
-				PT_APP_INFO("Diagnostic mode {}: {}", i_Mode + 1, ModeName(m_Mode));
+				PT_APP_INFO("Render mode {}: {}", i_Mode + 1, ModeName(m_Mode));
 			}
 		}
 
@@ -145,7 +153,23 @@ namespace Sandbox
 		{
 			m_OrbitPaused = !m_OrbitPaused;
 
-			PT_APP_INFO("Orbit {}", m_OrbitPaused ? "paused" : "running");
+			PT_APP_INFO("Orbit {}", m_OrbitPaused ? "paused, the path tracer accumulates" : "running");
+		}
+
+		// A new bounce limit restarts the accumulation, a new render scale recreates the view images
+		if (input.WasKeyPressed(Engine::Key::B))
+		{
+			m_BounceLimitIndex = (m_BounceLimitIndex + 1) % k_BounceLimitCount;
+			m_Settings.MaxBounces = k_BounceLimits[m_BounceLimitIndex];
+
+			PT_APP_INFO("Bounce limit {}", m_Settings.MaxBounces);
+		}
+
+		if (input.WasKeyPressed(Engine::Key::R))
+		{
+			m_RenderScaleIndex = (m_RenderScaleIndex + 1) % k_RenderScaleCount;
+
+			PT_APP_INFO("Render scale {:.2f}", k_RenderScales[m_RenderScaleIndex]);
 		}
 
 		if (input.WasKeyPressed(Engine::Key::LeftBracket) || input.WasKeyPressed(Engine::Key::RightBracket))
@@ -223,7 +247,9 @@ namespace Sandbox
 		{
 			const float l_AverageMilliseconds = (m_StatisticsElapsed / static_cast<float>(m_StatisticsFrames)) * 1000.0f;
 
-			PT_APP_TRACE("Frame {}: {} frames in {:.2f}s, {:.2f} ms average, focus {}, capture {}, mouse delta ({:.1f}, {:.1f}), mode {}, camera ({:.2f}, {:.2f}, {:.2f}) at {}x{}, {} entities, {} materials, scene revision {}, selected {}", time.FrameIndex, m_StatisticsFrames, m_StatisticsElapsed, l_AverageMilliseconds, input.HasFocus, input.MouseCaptured, m_StatisticsMouseDeltaX, m_StatisticsMouseDeltaY, ModeName(m_Mode), m_Camera.Position.x, m_Camera.Position.y, m_Camera.Position.z, m_Camera.ViewWidth, m_Camera.ViewHeight, m_Scene.GetEntities().size(), m_Scene.GetMaterials().size(), m_Scene.GetRadianceRevision(), std::to_underlying(m_SelectedEntity));
+			const Engine::RenderRequest l_Request = GetRenderRequest();
+
+			PT_APP_TRACE("Frame {}: {} frames in {:.2f}s, {:.2f} ms average, focus {}, capture {}, mouse delta ({:.1f}, {:.1f}), mode {}, camera ({:.2f}, {:.2f}, {:.2f}), view {}x{} at scale {:.2f}, {} bounces, {} entities, {} materials, scene revision {}, selected {}", time.FrameIndex, m_StatisticsFrames, m_StatisticsElapsed, l_AverageMilliseconds, input.HasFocus, input.MouseCaptured, m_StatisticsMouseDeltaX, m_StatisticsMouseDeltaY, ModeName(m_Mode), m_Camera.Position.x, m_Camera.Position.y, m_Camera.Position.z, l_Request.View.Width, l_Request.View.Height, k_RenderScales[m_RenderScaleIndex], m_Settings.MaxBounces, m_Scene.GetEntities().size(), m_Scene.GetMaterials().size(), m_Scene.GetRadianceRevision(), std::to_underlying(m_SelectedEntity));
 
 			m_StatisticsElapsed = 0.0f;
 			m_StatisticsFrames = 0;
@@ -245,9 +271,7 @@ namespace Sandbox
 		m_Camera.Position = Engine::Math::Vector3(l_Horizontal * std::sin(m_OrbitAngle), k_OrbitRadius * std::sin(k_OrbitElevation), l_Horizontal * std::cos(m_OrbitAngle));
 		m_Camera.Orientation = Engine::LookAtOrientation(m_Camera.Position, Engine::Math::Vector3(0.0f, 0.0f, 0.0f));
 
-		// The render extent is the framebuffer until RenderView owns it in Step 7, a mismatch here shows up as a stretched sphere
-		m_Camera.ViewWidth = static_cast<uint32_t>(std::max(m_Services->GetFramebufferWidth(), 0));
-		m_Camera.ViewHeight = static_cast<uint32_t>(std::max(m_Services->GetFramebufferHeight(), 0));
+		// The view owns the render extent, the renderer copies it into the camera so the aspect ratio always follows the view
 	}
 
 	void SandboxClient::BuildDemoScene()
@@ -464,10 +488,18 @@ namespace Sandbox
 
 	Engine::RenderRequest SandboxClient::GetRenderRequest() const
 	{
+		// The view renders at a fraction of the framebuffer, the tone map stretches it back to the window, so a lower scale is a cheaper frame with the same framing
+		const float l_Scale = k_RenderScales[m_RenderScaleIndex];
+		const float l_FramebufferWidth = static_cast<float>(std::max(m_Services->GetFramebufferWidth(), 0));
+		const float l_FramebufferHeight = static_cast<float>(std::max(m_Services->GetFramebufferHeight(), 0));
+
 		Engine::RenderRequest l_Request;
-		l_Request.ActiveCamera = m_Camera;
+		l_Request.View.Width = std::max(static_cast<uint32_t>(l_FramebufferWidth * l_Scale), 1u);
+		l_Request.View.Height = std::max(static_cast<uint32_t>(l_FramebufferHeight * l_Scale), 1u);
+		l_Request.View.ActiveCamera = m_Camera;
+		l_Request.View.Settings = m_Settings;
+		l_Request.View.Mode = m_Mode;
 		l_Request.ActiveScene = &m_Scene;
-		l_Request.Mode = m_Mode;
 		l_Request.Exposure = std::exp2(m_ExposureStops);
 
 		return l_Request;

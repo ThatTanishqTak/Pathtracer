@@ -24,8 +24,8 @@ namespace Engine
 	class VulkanMemoryAllocator;
 	class VulkanSwapchain;
 	class VulkanCommandPool;
-	class VulkanImage;
 	class VulkanComputePipeline;
+	class VulkanRenderView;
 
 	class VulkanRenderer
 	{
@@ -61,11 +61,12 @@ namespace Engine
 			uint32_t FrameSlot = 0;
 			uint32_t ImageIndex = 0;
 			uint64_t SwapchainGeneration = 0;
-			uint64_t SubmittedTimelineValue = 0;
+			uint64_t ViewTimelineValue = 0; // The view batch, submitted before the acquire, zero until it was accepted
+			uint64_t SubmittedTimelineValue = 0; // The present batch
 			Stage AcquireStage = Stage::None;
 		};
 
-		// Each slot owns the scene records its submissions read, rewritten only after WaitForFrame retired the slot's previous submission
+		// Each slot owns the scene records and the integrator constants its submissions read, rewritten only after WaitForFrame retired the slot's previous batches
 		struct FrameResources
 		{
 			uint64_t SubmittedTimelineValue = 0;
@@ -73,23 +74,37 @@ namespace Engine
 			VulkanBuffer PrimitiveBuffer;
 			VulkanBuffer MaterialBuffer;
 			uint64_t UploadedRevision = 0; // The RenderScene::Revision the buffers hold
+
+			VulkanBuffer PathtraceConstantBuffer; // Uniform block for Pathtrace.slang, rewritten every path-traced frame
 		};
+
+		// Two command buffers per slot: the view batch, which needs no swapchain image, and the present batch, which waits for the acquire
+		static constexpr uint32_t k_CommandBuffersPerFrame = 2;
+		static uint32_t GetViewCommandBufferIndex(uint32_t frameSlot) { return frameSlot * k_CommandBuffersPerFrame; }
+		static uint32_t GetPresentCommandBufferIndex(uint32_t frameSlot) { return frameSlot * k_CommandBuffersPerFrame + 1; }
 
 		void InitializeVolk();
 		void ShutdownVolk();
 
 		VkResult CreateDiagnosticResources();
-		VkResult CreateHdrImage();
 		void DestroyDiagnosticResources();
+
+		VkResult CreatePathtraceResources();
+		void DestroyPathtraceResources();
 
 		VkResult CreateToneMapResources();
 		void DestroyToneMapResources();
+
+		VkResult CreateRenderView();
+		void DestroyRenderView();
 
 		VkResult PrepareSceneResources(const RenderRequest& request, uint32_t frameSlot);
 		VkResult UploadSceneBuffer(VulkanBuffer& buffer, const void* data, VkDeviceSize size, VkDeviceSize minimumSize, const char* debugName);
 		void DestroySceneResources();
 
-		VkResult RecordFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, uint32_t frameSlot, const RenderRequest& request);
+		VkResult PrepareRenderView(const RenderRequest& request, uint32_t frameSlot, uint32_t& sampleCount);
+		VkResult RecordViewFrame(VkCommandBuffer commandBuffer, uint32_t frameSlot, const RenderRequest& request);
+		VkResult RecordPresentFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderRequest& request);
 
 		RenderOutcome FailFrame(const FrameRecord& frame, const char* stage, VkResult result);
 
@@ -102,8 +117,9 @@ namespace Engine
 		std::unique_ptr<VulkanSynchronization> m_VulkanSynchronization;
 		std::unique_ptr<VulkanCommandPool> m_VulkanCommandPool;
 		std::unique_ptr<VulkanComputePipeline> m_DiagnosticPipeline;
-		std::unique_ptr<VulkanImage> m_HdrImage;
+		std::unique_ptr<VulkanComputePipeline> m_PathtracePipeline;
 		std::unique_ptr<VulkanComputePipeline> m_ToneMapPipeline;
+		std::unique_ptr<VulkanRenderView> m_RenderView; // The one view the window shows, Step 10 adds the Editor viewport next to it
 		std::array<FrameResources, VulkanSynchronization::k_MaxFramesInFlight> m_FrameResources;
 		RenderScene m_RenderScene; // The packed records of the last extracted revision, the client's Scene itself is never kept
 

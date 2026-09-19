@@ -37,8 +37,10 @@ namespace Engine
 
 		m_Device = &device;
 		m_Swapchain = &swapchain;
+		m_TimelineValue = 0;
 		m_SubmittedFrameCount = 0;
 		m_SwapchainGeneration = swapchain.GetGeneration();
+		m_SlotTimelineValues.fill(0);
 
 		if (CreateTimelineSemaphore() != VK_SUCCESS || CreateAcquireFences() != VK_SUCCESS || CreateFrameSemaphores() != VK_SUCCESS)
 		{
@@ -87,8 +89,10 @@ namespace Engine
 		DestroyAcquireFences();
 		DestroyTimelineSemaphore();
 
+		m_TimelineValue = 0;
 		m_SubmittedFrameCount = 0;
 		m_SwapchainGeneration = 0;
+		m_SlotTimelineValues.fill(0);
 		m_Swapchain = nullptr;
 		m_Device = nullptr;
 
@@ -165,9 +169,12 @@ namespace Engine
 			return l_RehookResult;
 		}
 
-		if (m_SubmittedFrameCount >= k_MaxFramesInFlight)
+		// Every batch the slot submitted, the view batch and the present batch alike, signalled a value at most this one
+		const uint32_t l_FrameSlot = GetFrameIndex();
+		const uint64_t l_SlotValue = m_SlotTimelineValues[l_FrameSlot];
+		if (l_SlotValue != 0)
 		{
-			const VkResult l_TimelineResult = WaitForTimelineValue(m_SubmittedFrameCount + 1 - k_MaxFramesInFlight);
+			const VkResult l_TimelineResult = WaitForTimelineValue(l_SlotValue);
 			if (l_TimelineResult != VK_SUCCESS)
 			{
 				return l_TimelineResult;
@@ -175,7 +182,57 @@ namespace Engine
 		}
 
 		// The slot's acquire semaphore and fence are about to be reused, establish that their previous acquire completed
-		return WaitForAcquire(GetFrameIndex());
+		return WaitForAcquire(l_FrameSlot);
+	}
+
+	VkResult VulkanSynchronization::SubmitCompute(VkQueue queue, VkCommandBuffer commandBuffer, uint64_t& submittedValue)
+	{
+		submittedValue = 0;
+
+		if (!IsInitialized())
+		{
+			return VK_ERROR_INITIALIZATION_FAILED;
+		}
+
+		const uint64_t l_SignalValue = m_TimelineValue + 1;
+
+		VkSemaphoreSubmitInfo l_SignalSemaphoreInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+			.semaphore = m_TimelineSemaphore,
+			.value = l_SignalValue,
+			.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+		};
+
+		VkCommandBufferSubmitInfo l_CommandBufferSubmitInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+			.commandBuffer = commandBuffer,
+		};
+
+		VkSubmitInfo2 l_SubmitInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+			.commandBufferInfoCount = 1,
+			.pCommandBufferInfos = &l_CommandBufferSubmitInfo,
+			.signalSemaphoreInfoCount = 1,
+			.pSignalSemaphoreInfos = &l_SignalSemaphoreInfo,
+		};
+
+		const VkResult l_Result = vkQueueSubmit2(queue, 1, &l_SubmitInfo, VK_NULL_HANDLE);
+		if (l_Result != VK_SUCCESS)
+		{
+			PT_CORE_ERROR("Failed vkQueueSubmit2 for a compute batch: {}", VulkanUtilities::ResultToString(l_Result));
+
+			return l_Result;
+		}
+
+		// The slot now has GPU work outstanding even though no frame was presented, WaitForFrame retires it through this value
+		m_TimelineValue = l_SignalValue;
+		m_SlotTimelineValues[GetFrameIndex()] = l_SignalValue;
+		submittedValue = l_SignalValue;
+
+		return VK_SUCCESS;
 	}
 
 	VkResult VulkanSynchronization::Submit(VkQueue queue, VkCommandBuffer commandBuffer, uint32_t imageIndex, uint64_t& submittedValue)
@@ -194,7 +251,7 @@ namespace Engine
 			return VK_ERROR_UNKNOWN;
 		}
 
-		const uint64_t l_SignalValue = m_SubmittedFrameCount + 1;
+		const uint64_t l_SignalValue = m_TimelineValue + 1;
 
 		VkSemaphoreSubmitInfo l_WaitSemaphoreInfo
 		{
@@ -245,8 +302,10 @@ namespace Engine
 			return l_Result;
 		}
 
-		// Only counted as in flight once the queue accepted the work
-		m_SubmittedFrameCount = l_SignalValue;
+		// Only counted as in flight once the queue accepted the work, and only a present batch moves the slot along
+		m_TimelineValue = l_SignalValue;
+		m_SlotTimelineValues[GetFrameIndex()] = l_SignalValue;
+		m_SubmittedFrameCount += 1;
 		submittedValue = l_SignalValue;
 
 		return VK_SUCCESS;
@@ -259,12 +318,12 @@ namespace Engine
 			return VK_ERROR_INITIALIZATION_FAILED;
 		}
 
-		if (m_SubmittedFrameCount == 0)
+		if (m_TimelineValue == 0)
 		{
 			return VK_SUCCESS;
 		}
 
-		return WaitForTimelineValue(m_SubmittedFrameCount);
+		return WaitForTimelineValue(m_TimelineValue);
 	}
 
 	void VulkanSynchronization::MarkAcquirePending()

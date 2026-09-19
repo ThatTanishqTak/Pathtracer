@@ -13,7 +13,7 @@ namespace Engine
 		Invalid = 0,
 	};
 
-	// Values match the constants in Diagnostic.slang, the Step 7 integrator switches on them
+	// Values match the constants in Modules/SceneRecords.slang
 	enum class MaterialType : uint8_t
 	{
 		Diffuse = 0, // Lambertian, BaseColor is the albedo

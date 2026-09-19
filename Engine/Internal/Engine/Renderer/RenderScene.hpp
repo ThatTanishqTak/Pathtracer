@@ -15,14 +15,14 @@ namespace Engine
 {
 	class Scene;
 
-	// Values match the constants in Diagnostic.slang
+	// Values match the constants in Modules/SceneRecords.slang
 	enum class RenderPrimitiveType : uint32_t
 	{
 		Sphere = 0, // Unit sphere at the object origin
 		Quad = 1, // Unit square in the object XY plane, normal along +Z
 	};
 
-	// Must match PrimitiveRecord in Diagnostic.slang, std430 layout. The matrices are stored as four float4 columns so the shader never depends on a matrix layout convention
+	// Must match PrimitiveRecord in Modules/SceneRecords.slang, std430 layout. The matrices are stored as four float4 columns so the shader never depends on a matrix layout convention
 	struct RenderPrimitiveRecord
 	{
 		std::array<float, 16> ObjectToWorld{}; // Column-major, world = C0 * x + C1 * y + C2 * z + C3
@@ -33,7 +33,7 @@ namespace Engine
 		uint32_t EntityIdHigh = 0;
 	};
 
-	static_assert(sizeof(RenderPrimitiveRecord) == 144, "RenderPrimitiveRecord must match the 144 byte PrimitiveRecord in Diagnostic.slang");
+	static_assert(sizeof(RenderPrimitiveRecord) == 144, "RenderPrimitiveRecord must match the 144 byte PrimitiveRecord in Modules/SceneRecords.slang");
 	static_assert(offsetof(RenderPrimitiveRecord, ObjectToWorld) == 0, "ObjectToWorld must sit at std430 offset 0");
 	static_assert(offsetof(RenderPrimitiveRecord, WorldToObject) == 64, "WorldToObject must sit at std430 offset 64");
 	static_assert(offsetof(RenderPrimitiveRecord, Type) == 128, "Type must sit at std430 offset 128");
@@ -41,7 +41,7 @@ namespace Engine
 	static_assert(offsetof(RenderPrimitiveRecord, EntityIdLow) == 136, "EntityIdLow must sit at std430 offset 136");
 	static_assert(offsetof(RenderPrimitiveRecord, EntityIdHigh) == 140, "EntityIdHigh must sit at std430 offset 140");
 
-	// Must match MaterialRecord in Diagnostic.slang, std430 layout
+	// Must match MaterialRecord in Modules/SceneRecords.slang, std430 layout
 	struct RenderMaterialRecord
 	{
 		std::array<float, 4> BaseColor{}; // Linear RGB, w unused
@@ -52,7 +52,7 @@ namespace Engine
 		uint32_t Padding2 = 0;
 	};
 
-	static_assert(sizeof(RenderMaterialRecord) == 48, "RenderMaterialRecord must match the 48 byte MaterialRecord in Diagnostic.slang");
+	static_assert(sizeof(RenderMaterialRecord) == 48, "RenderMaterialRecord must match the 48 byte MaterialRecord in Modules/SceneRecords.slang");
 	static_assert(offsetof(RenderMaterialRecord, BaseColor) == 0, "BaseColor must sit at std430 offset 0");
 	static_assert(offsetof(RenderMaterialRecord, EmittedRadiance) == 16, "EmittedRadiance must sit at std430 offset 16");
 	static_assert(offsetof(RenderMaterialRecord, Type) == 32, "Type must sit at std430 offset 32");
@@ -63,7 +63,7 @@ namespace Engine
 		std::vector<RenderPrimitiveRecord> Primitives;
 		std::vector<RenderMaterialRecord> Materials; // Never empty after a build, index 0 is the fallback material
 
-		Math::Vector3 EnvironmentRadiance{ 0.0f, 0.0f, 0.0f }; // Extracted now, uploaded by the Step 7 integrator
+		Math::Vector3 EnvironmentRadiance{ 0.0f, 0.0f, 0.0f }; // Uploaded with the integrator constants, returned by every path that escapes the scene
 
 		uint64_t Revision = 0; // The Scene::GetRadianceRevision the records were built from
 	};
