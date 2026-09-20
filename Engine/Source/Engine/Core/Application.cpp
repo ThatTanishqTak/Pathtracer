@@ -5,6 +5,7 @@
 #include "Engine/Platform/Platform.hpp"
 #include "Engine/Window/Window.hpp"
 #include "Engine/Renderer/Renderer.hpp"
+#include "Engine/UI/UILayer.hpp"
 #include "Engine/Core/Log.hpp"
 
 #include <algorithm>
@@ -64,6 +65,16 @@ namespace Engine
 		return m_Application->GetExecutableDirectory();
 	}
 
+	bool ApplicationServices::IsUIEnabled() const
+	{
+		return m_Application->IsUIEnabled();
+	}
+
+	uint64_t ApplicationServices::GetViewTextureId() const
+	{
+		return m_Application->GetViewTextureId();
+	}
+
 	Application::Application() = default;
 	Application::~Application() = default;
 
@@ -116,9 +127,23 @@ namespace Engine
 		}
 
 		m_Window->SetEventCallback([this](const InputEvent& event) { OnInputEvent(event); });
+		if (m_Specification.EnableUI)
+		{
+			m_UILayer = std::make_unique<UILayer>();
+			if (!m_UILayer->Initialize(*m_Window, m_Specification.Name + ".layout.ini"))
+			{
+				PT_CORE_CRITICAL("Failed to initialize the UI layer, aborting startup");
+
+				Shutdown();
+
+				return;
+			}
+
+			m_Window->SetRawEventCallback([this](const SDL_Event& event) { m_UILayer->ProcessEvent(event); });
+		}
 
 		m_Renderer = std::make_unique<Renderer>();
-		m_Renderer->Initialize(*m_Window);
+		m_Renderer->Initialize(*m_Window, m_UILayer != nullptr);
 		if (!m_Renderer->IsInitialized())
 		{
 			PT_CORE_CRITICAL("Failed to initialize renderer, aborting startup");
@@ -135,7 +160,7 @@ namespace Engine
 
 	void Application::Shutdown()
 	{
-		if (!m_Renderer && !m_Window && !m_Platform && !m_Client)
+		if (!m_Renderer && !m_UILayer && !m_Window && !m_Platform && !m_Client)
 		{
 			m_Initialized = false;
 
@@ -150,6 +175,12 @@ namespace Engine
 		{
 			m_Renderer->Shutdown();
 			m_Renderer.reset();
+		}
+
+		if (m_UILayer)
+		{
+			m_UILayer->Shutdown();
+			m_UILayer.reset();
 		}
 
 		if (m_Window)
@@ -240,12 +271,20 @@ namespace Engine
 			l_FrameTime.DeltaSeconds = std::min(l_Elapsed, k_MaxDeltaSeconds);
 			l_FrameTime.TotalSeconds = std::chrono::duration<double>(l_Now - l_StartTime).count();
 
-			// 5. Client update and its render request
+			// 5. The UI frame: the client lays out its panels, reads the edits and decides who owns the input before Update acts on it. Nothing happens here for a client without the UI
+			if (m_UILayer)
+			{
+				m_UILayer->BeginFrame();
+				m_Client->BuildUI();
+				m_UILayer->EndFrame();
+			}
+
+			// 6. Client update and its render request
 			m_Client->Update(l_FrameTime, m_Input);
 
 			const RenderRequest l_Request = m_Client->GetRenderRequest();
 
-			// 6. Render and react to the outcome
+			// 7. Render and react to the outcome, the UI draw data from step 5 is composed into the same frame
 			const RenderOutcome l_Outcome = m_Renderer->Render(l_Request);
 
 			if (l_Outcome == RenderOutcome::Fatal)
@@ -459,6 +498,21 @@ namespace Engine
 	std::filesystem::path Application::GetExecutableDirectory() const
 	{
 		return FileSystem::GetExecutableDirectory();
+	}
+
+	bool Application::IsUIEnabled() const
+	{
+		return m_UILayer != nullptr && m_UILayer->IsInitialized();
+	}
+
+	uint64_t Application::GetViewTextureId() const
+	{
+		if (!m_Renderer)
+		{
+			return 0;
+		}
+
+		return m_Renderer->GetViewTextureId();
 	}
 
 	const ApplicationSpecification& Application::GetSpecification() const

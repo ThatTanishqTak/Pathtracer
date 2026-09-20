@@ -25,7 +25,7 @@ namespace Engine
 		uint32_t Seed = 0; // Deterministic, the same seed and sample count reproduce the same image
 	};
 
-	// One rendered image: its own pixel extent, the camera that looks through it and how it is rendered. The renderer owns the GPU images and the accumulation behind it, and shows the result in the window until Step 10 adds a sampled display texture
+	// One rendered image: its own pixel extent, the camera that looks through it and how it is rendered. The renderer owns the GPU images and the accumulation behind it, and tone maps the result into a display texture the window or the UI viewport shows
 	struct RenderView
 	{
 		uint32_t Width = 0; // Requested render extent in pixels, independent of the window size. Zero renders one pixel

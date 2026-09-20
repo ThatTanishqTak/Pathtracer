@@ -96,6 +96,7 @@ target_link_libraries(${TARGET_NAME}
         GPUOpen::VulkanMemoryAllocator
         spdlog
         nlohmann_json::nlohmann_json
+        imgui
 )
 
 # Engine properties

@@ -2,22 +2,32 @@
 
 #include "Engine/Renderer/Vulkan/VulkanDevice.hpp"
 #include "Engine/Renderer/Vulkan/VulkanMemoryAllocator.hpp"
+#include "Engine/Renderer/Vulkan/VulkanUIBackend.hpp"
 #include "Engine/Core/Log.hpp"
+
+#include <utility>
 
 namespace Engine
 {
 	namespace
 	{
-		// Both images are linear float, the shaders declare rgba32f so the writes never rely on write-without-format
+		// Both view images are linear float, the shaders declare rgba32f so the writes never rely on write-without-format
 		constexpr VkFormat k_ViewImageFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
 		constexpr VkImageUsageFlags k_AccumulationImageUsage = VK_IMAGE_USAGE_STORAGE_BIT;
 		constexpr VkImageUsageFlags k_OutputImageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+		// The display texture is UNORM and holds sRGB-encoded values, ToneMap.slang declares rgba8 for the storage write and the display pass and the UI sample it
+		constexpr VkFormat k_DisplayImageFormat = VK_FORMAT_R8G8B8A8_UNORM;
+		constexpr VkImageUsageFlags k_DisplayImageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+		// The layout the display texture is registered and sampled in, the view batch leaves it there every frame
+		constexpr VkImageLayout k_DisplayImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	}
 
 	VulkanRenderView::VulkanRenderView() = default;
 	VulkanRenderView::~VulkanRenderView() = default;
 
-	VkResult VulkanRenderView::Initialize(const VulkanDevice& device, const VulkanMemoryAllocator& allocator)
+	VkResult VulkanRenderView::Initialize(const VulkanDevice& device, const VulkanMemoryAllocator& allocator, const VulkanUIBackend* uiBackend)
 	{
 		if (m_Device != nullptr)
 		{
@@ -37,6 +47,10 @@ namespace Engine
 
 		m_Device = &device;
 		m_Allocator = &allocator;
+		m_UIBackend = uiBackend;
+		m_DisplayImage = std::make_unique<VulkanImage>();
+		m_DisplayTextureId = 0;
+		m_RetiredDisplayTextureId = 0;
 		m_Width = 0;
 		m_Height = 0;
 		m_AccumulatedSamples = 0;
@@ -56,10 +70,14 @@ namespace Engine
 
 		PT_CORE_INFO("------- SHUTTING DOWN VULKAN RENDER VIEW -------");
 
+		// The caller waited for every frame, so the retired display texture has no user left either
 		DestroyImages();
+		ReleaseRetiredDisplayImage();
 
+		m_DisplayImage.reset();
 		m_AccumulatedSamples = 0;
 		m_Key = RenderViewKey{};
+		m_UIBackend = nullptr;
 		m_Allocator = nullptr;
 		m_Device = nullptr;
 
@@ -85,7 +103,9 @@ namespace Engine
 			return VK_ERROR_INITIALIZATION_FAILED;
 		}
 
-		// The caller retired every submission that used the old images, so they can go before the new ones exist
+		// The caller retired every submission that used the old images, so the accumulation and output go before the new ones exist. A display texture the UI registered is retired instead: BuildUI ran before this frame's Render and its draw list may name the old id, so the old texture stays alive until the next Resize has waited for every frame again
+		ReleaseRetiredDisplayImage();
+		RetireDisplayImage();
 		DestroyImages();
 
 		const VulkanImageSpecification l_AccumulationSpecification
@@ -122,6 +142,35 @@ namespace Engine
 			return l_Result;
 		}
 
+		const VulkanImageSpecification l_DisplaySpecification
+		{
+			.Width = width,
+			.Height = height,
+			.Format = k_DisplayImageFormat,
+			.Usage = k_DisplayImageUsage,
+			.DebugName = "view display",
+		};
+
+		l_Result = m_DisplayImage->Initialize(*m_Device, *m_Allocator, l_DisplaySpecification);
+		if (l_Result != VK_SUCCESS)
+		{
+			DestroyImages();
+
+			return l_Result;
+		}
+
+		// The UI draws the display texture through this id, registered in the layout the view batch leaves it in
+		if (m_UIBackend != nullptr)
+		{
+			m_DisplayTextureId = m_UIBackend->RegisterTexture(m_DisplayImage->GetView(), k_DisplayImageLayout);
+			if (m_DisplayTextureId == 0)
+			{
+				DestroyImages();
+
+				return VK_ERROR_OUT_OF_POOL_MEMORY;
+			}
+		}
+
 		m_Width = width;
 		m_Height = height;
 
@@ -153,10 +202,54 @@ namespace Engine
 
 	void VulkanRenderView::DestroyImages()
 	{
+		// The caller waited for every frame, or the images were never used, so the id goes with the image
+		if (m_DisplayTextureId != 0 && m_UIBackend != nullptr)
+		{
+			m_UIBackend->UnregisterTexture(m_DisplayTextureId);
+		}
+
+		m_DisplayTextureId = 0;
+
+		if (m_DisplayImage)
+		{
+			m_DisplayImage->Shutdown();
+		}
+
 		m_OutputImage.Shutdown();
 		m_AccumulationImage.Shutdown();
 
 		m_Width = 0;
 		m_Height = 0;
+	}
+
+	void VulkanRenderView::RetireDisplayImage()
+	{
+		// Without a registered id only GPU batches referenced the texture, and the caller retired those, so it is destroyed with the other images
+		if (m_DisplayTextureId == 0)
+		{
+			return;
+		}
+
+		m_RetiredDisplayImage = std::move(m_DisplayImage);
+		m_RetiredDisplayTextureId = m_DisplayTextureId;
+
+		m_DisplayImage = std::make_unique<VulkanImage>();
+		m_DisplayTextureId = 0;
+	}
+
+	void VulkanRenderView::ReleaseRetiredDisplayImage()
+	{
+		if (m_RetiredDisplayTextureId != 0 && m_UIBackend != nullptr)
+		{
+			m_UIBackend->UnregisterTexture(m_RetiredDisplayTextureId);
+		}
+
+		m_RetiredDisplayTextureId = 0;
+
+		if (m_RetiredDisplayImage)
+		{
+			m_RetiredDisplayImage->Shutdown();
+			m_RetiredDisplayImage.reset();
+		}
 	}
 }

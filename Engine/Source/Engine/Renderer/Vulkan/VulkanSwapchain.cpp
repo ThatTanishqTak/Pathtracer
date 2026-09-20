@@ -15,7 +15,7 @@ namespace Engine
 		constexpr VkFormat k_PreferredFormat = VK_FORMAT_B8G8R8A8_UNORM;
 		constexpr VkColorSpaceKHR k_PreferredColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 
-		// The tone map dispatch writes the images as storage images, the color attachment usage is for a later UI pass
+		// The display and UI passes render into the images as colour attachments. The storage usage stays: it is what keeps ChooseSurfaceFormat on a UNORM format, so the sRGB encode the tone map already applied is never applied a second time by the hardware
 		constexpr VkImageUsageFlags k_ImageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
 		bool SupportsStorageImage(VkPhysicalDevice physicalDevice, VkFormat format)
@@ -489,6 +489,10 @@ namespace Engine
 			return SwapchainResult{ SwapchainStatus::Failed, VK_ERROR_FORMAT_NOT_SUPPORTED };
 		}
 
+		// Remembered before the extent check: the display and UI pipelines are built against the format at initialization, which may happen while creation is deferred, and the same surface yields the same choice on every attempt
+		m_ImageFormat = l_SurfaceFormat.format;
+		m_ColorSpace = l_SurfaceFormat.colorSpace;
+
 		const VkPresentModeKHR l_PresentMode = ChoosePresentMode(l_PresentModes, m_VerticalSync);
 		const VkExtent2D l_Extent = ChooseExtent(l_Capabilities);
 
@@ -544,8 +548,6 @@ namespace Engine
 		}
 
 		m_Swapchain = l_Swapchain;
-		m_ImageFormat = l_SurfaceFormat.format;
-		m_ColorSpace = l_SurfaceFormat.colorSpace;
 		m_Extent = l_Extent;
 		m_PresentMode = l_PresentMode;
 

@@ -1,21 +1,18 @@
-// Must match ToneMapParameters in VulkanRenderer.cpp, std430 push constant layout: uint2 at 0, uint2 at 8, float at 16, three floats of padding to 32
+// Must match ToneMapParameters in VulkanRenderer.cpp, std430 push constant layout: uint2 at 0, float at 8, one float of padding to 16
 struct ToneMapParameters
 {
-	uint2 InputExtent; // The view's output image
-	uint2 OutputExtent; // The swapchain image
+	uint2 Extent; // The view extent, shared by the output image read and the display image written
 	float Exposure;
 	float Padding0;
-	float Padding1;
-	float Padding2;
 };
 
-// Binding 0: the linear scene color the view wrote, fetched by texel at the nearest source pixel so no sampler is needed when the two extents differ
+// Binding 0: the linear scene color the view wrote, fetched by texel with Load, the pass runs at the view extent so no sampler is needed
 [[vk::binding(0, 0)]]
 Texture2D<float4> u_Input;
 
-// Binding 1: the swapchain image, left without a format because storage images must match the view's format exactly and B8G8R8A8 has no SPIR-V equivalent
-// The write relies on the shaderStorageImageWriteWithoutFormat feature VulkanDevice requires
+// Binding 1: the view's display texture, an R8G8B8A8_UNORM image the engine owns, so the format is declared and the write never relies on write-without-format It holds sRGB-encoded display values from here on, the display pass and the UI sample it without encoding again
 [[vk::binding(1, 0)]]
+[format("rgba8")]
 RWTexture2D<float4> u_Output;
 
 // One small block per dispatch, pushed straight into the command buffer
@@ -37,7 +34,7 @@ float3 ToneMapACES(float3 color)
 	return saturate((color * (a * color + b)) / (color * (c * color + d) + e));
 }
 
-// The swapchain is a UNORM image in the sRGB nonlinear color space, so the transfer function is applied here, not by the hardware
+// The display texture and the swapchain are UNORM images in the sRGB nonlinear color space, so the transfer function is applied here, once, not by the hardware
 float3 LinearToSrgb(float3 color)
 {
 	const float3 l_Low = color * 12.92;
@@ -52,16 +49,14 @@ void computeMain(uint3 threadId : SV_DispatchThreadID)
 {
 	const uint2 l_Pixel = threadId.xy;
 
-	// The dispatch rounds up to whole workgroups, the C++ side verified the swapchain image has this extent
-	if (l_Pixel.x >= u_Parameters.OutputExtent.x || l_Pixel.y >= u_Parameters.OutputExtent.y)
-	{
-		return;
-	}
+    // The dispatch rounds up to whole workgroups, both images have the view extent
+    if (l_Pixel.x >= u_Parameters.Extent.x || l_Pixel.y >= u_Parameters.Extent.y)
+    {
+        return;
+    }
 
-	// Nearest source pixel, the view renders at its own resolution and the window shows it stretched until Step 10 gives the Editor a sampled display texture
-	const uint2 l_Source = min((l_Pixel * u_Parameters.InputExtent) / u_Parameters.OutputExtent, u_Parameters.InputExtent - uint2(1, 1));
-
-	const float3 l_Linear = u_Input.Load(int3(int2(l_Source), 0)).rgb;
+    // Same-size pass, the display pass or the UI viewport resamples the result to wherever it is shown
+    const float3 l_Linear = u_Input.Load(int3(int2(l_Pixel), 0)).rgb;
 
 	// Exposure is a linear scene-light scale applied before the curve
 	const float3 l_Display = ToneMapACES(l_Linear * u_Parameters.Exposure);

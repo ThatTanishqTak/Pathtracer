@@ -25,6 +25,9 @@ namespace Engine
 	class VulkanSwapchain;
 	class VulkanCommandPool;
 	class VulkanComputePipeline;
+	class VulkanComputePipeline;
+	class VulkanGraphicsPipeline;
+	class VulkanUIBackend;
 	class VulkanRenderView;
 
 	class VulkanRenderer
@@ -38,13 +41,15 @@ namespace Engine
 		VulkanRenderer(VulkanRenderer&&) = delete;
 		VulkanRenderer& operator=(VulkanRenderer&&) = delete;
 
-		void Initialize(const Window& window);
+		void Initialize(const Window& window, bool enableUI);
 		void Shutdown();
 
 		bool IsInitialized() const;
 		RenderOutcome Render(const RenderRequest& request);
 
 		void OnFramebufferResized();
+
+		uint64_t GetViewTextureId() const;
 
 	private:
 		// Describes one Render() call, the slot and generation are captured before Submit advances the frame count
@@ -78,7 +83,7 @@ namespace Engine
 			VulkanBuffer PathtraceConstantBuffer; // Uniform block for Pathtrace.slang, rewritten every path-traced frame
 		};
 
-		// Two command buffers per slot: the view batch, which needs no swapchain image, and the present batch, which waits for the acquire
+		// Two command buffers per slot: the view batch, which traces and tone maps without a swapchain image, and the present batch, which waits for the acquire and draws the display texture or the UI into it
 		static constexpr uint32_t k_CommandBuffersPerFrame = 2;
 		static uint32_t GetViewCommandBufferIndex(uint32_t frameSlot) { return frameSlot * k_CommandBuffersPerFrame; }
 		static uint32_t GetPresentCommandBufferIndex(uint32_t frameSlot) { return frameSlot * k_CommandBuffersPerFrame + 1; }
@@ -94,6 +99,12 @@ namespace Engine
 
 		VkResult CreateToneMapResources();
 		void DestroyToneMapResources();
+
+		VkResult CreateDisplayResources();
+		void DestroyDisplayResources();
+
+		VkResult CreateUIBackend();
+		void DestroyUIBackend();
 
 		VkResult CreateRenderView();
 		void DestroyRenderView();
@@ -119,11 +130,16 @@ namespace Engine
 		std::unique_ptr<VulkanComputePipeline> m_DiagnosticPipeline;
 		std::unique_ptr<VulkanComputePipeline> m_PathtracePipeline;
 		std::unique_ptr<VulkanComputePipeline> m_ToneMapPipeline;
-		std::unique_ptr<VulkanRenderView> m_RenderView; // The one view the window shows, Step 10 adds the Editor viewport next to it
+		std::unique_ptr<VulkanGraphicsPipeline> m_DisplayPipeline; // Fullscreen triangle from the display texture into the swapchain image
+		std::unique_ptr<VulkanUIBackend> m_UIBackend; // Only when the application enabled the UI
+		std::unique_ptr<VulkanRenderView> m_RenderView; // The one view the window or the UI viewport shows
 		std::array<FrameResources, VulkanSynchronization::k_MaxFramesInFlight> m_FrameResources;
+
+		VkSampler m_DisplaySampler = VK_NULL_HANDLE; // Linear and clamped, for the display pass
 		RenderScene m_RenderScene; // The packed records of the last extracted revision, the client's Scene itself is never kept
 
 		bool m_VolkInitialized = false;
+		bool m_UIEnabled = false;
 		bool m_Fatal = false;
 	};
 }

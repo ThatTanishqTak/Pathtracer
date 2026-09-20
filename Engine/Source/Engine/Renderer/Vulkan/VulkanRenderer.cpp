@@ -10,6 +10,8 @@
 #include "Engine/Renderer/Vulkan/VulkanImage.hpp"
 #include "Engine/Renderer/Vulkan/VulkanShaderModule.hpp"
 #include "Engine/Renderer/Vulkan/VulkanComputePipeline.hpp"
+#include "Engine/Renderer/Vulkan/VulkanGraphicsPipeline.hpp"
+#include "Engine/Renderer/Vulkan/VulkanUIBackend.hpp"
 #include "Engine/Renderer/Vulkan/VulkanRenderView.hpp"
 #include "Engine/Renderer/Vulkan/VulkanUtilities.hpp"
 #include "Engine/Core/FileSystem.hpp"
@@ -39,6 +41,13 @@ namespace Engine
 		constexpr uint32_t k_ToneMapWorkgroupSize = 8;
 		constexpr const char* k_ToneMapShaderFile = "ToneMap.slang.spv";
 		constexpr const char* k_ToneMapEntryPoint = "computeMain";
+
+		constexpr const char* k_DisplayShaderFile = "Display.slang.spv";
+		constexpr const char* k_DisplayVertexEntryPoint = "vertexMain";
+		constexpr const char* k_DisplayFragmentEntryPoint = "fragmentMain";
+
+		// What the UI draws over when no view fills the window, already display-encoded like everything in the swapchain
+		constexpr std::array<float, 4> k_UIClearColor{ 0.06f, 0.06f, 0.07f, 1.0f };
 
 		constexpr VkBufferUsageFlags k_SceneBufferUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 		constexpr VkBufferUsageFlags k_ConstantBufferUsage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
@@ -134,26 +143,20 @@ namespace Engine
 			return GetCameraRayFrame(l_Camera);
 		}
 
-		// Must match ToneMapParameters in ToneMap.slang, std430 push constant layout: uint2 at 0, uint2 at 8, float at 16, three floats of padding to 32
+		// Must match ToneMapParameters in ToneMap.slang, std430 push constant layout: uint2 at 0, float at 8, one float of padding to 16
 		struct ToneMapParameters
 		{
-			uint32_t InputWidth = 0;
-			uint32_t InputHeight = 0;
-			uint32_t OutputWidth = 0;
-			uint32_t OutputHeight = 0;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
 			float Exposure = 1.0f;
 			float Padding0 = 0.0f;
-			float Padding1 = 0.0f;
-			float Padding2 = 0.0f;
 		};
 
-		static_assert(sizeof(ToneMapParameters) == 32, "ToneMapParameters must match the 32 byte push constant block in ToneMap.slang");
-		static_assert(offsetof(ToneMapParameters, InputWidth) == 0, "InputExtent.x must sit at std430 offset 0");
-		static_assert(offsetof(ToneMapParameters, InputHeight) == 4, "InputExtent.y must sit at std430 offset 4");
-		static_assert(offsetof(ToneMapParameters, OutputWidth) == 8, "OutputExtent.x must sit at std430 offset 8");
-		static_assert(offsetof(ToneMapParameters, OutputHeight) == 12, "OutputExtent.y must sit at std430 offset 12");
-		static_assert(offsetof(ToneMapParameters, Exposure) == 16, "Exposure must sit at std430 offset 16");
-		static_assert(offsetof(ToneMapParameters, Padding0) == 20, "Padding0 must sit at std430 offset 20");
+		static_assert(sizeof(ToneMapParameters) == 16, "ToneMapParameters must match the 16 byte push constant block in ToneMap.slang");
+		static_assert(offsetof(ToneMapParameters, Width) == 0, "Extent.x must sit at std430 offset 0");
+		static_assert(offsetof(ToneMapParameters, Height) == 4, "Extent.y must sit at std430 offset 4");
+		static_assert(offsetof(ToneMapParameters, Exposure) == 8, "Exposure must sit at std430 offset 8");
+		static_assert(offsetof(ToneMapParameters, Padding0) == 12, "Padding0 must sit at std430 offset 12");
 
 		constexpr uint32_t DivideRoundingUp(uint32_t value, uint32_t divisor)
 		{
@@ -164,7 +167,7 @@ namespace Engine
 	VulkanRenderer::VulkanRenderer() = default;
 	VulkanRenderer::~VulkanRenderer() = default;
 
-	void VulkanRenderer::Initialize(const Window& window)
+	void VulkanRenderer::Initialize(const Window& window, bool enableUI)
 	{
 		if (IsInitialized())
 		{
@@ -179,6 +182,8 @@ namespace Engine
 		}
 
 		PT_CORE_INFO("------- INITIALIZING VULKAN RENDERER -------");
+
+		m_UIEnabled = enableUI;
 
 		InitializeVolk();
 		if (!m_VolkInitialized)
@@ -276,6 +281,24 @@ namespace Engine
 			return;
 		}
 
+		if (CreateDisplayResources() != VK_SUCCESS)
+		{
+			PT_CORE_CRITICAL("Failed to create the display resources");
+
+			Shutdown();
+
+			return;
+		}
+
+		if (m_UIEnabled && CreateUIBackend() != VK_SUCCESS)
+		{
+			PT_CORE_CRITICAL("Failed to create the UI backend");
+
+			Shutdown();
+
+			return;
+		}
+
 		if (CreateRenderView() != VK_SUCCESS)
 		{
 			PT_CORE_CRITICAL("Failed to create the render view");
@@ -292,10 +315,11 @@ namespace Engine
 	{
 		const bool l_CoreReady = m_VulkanInstance && m_VulkanInstance->IsInitialized() && m_VulkanSurface && m_VulkanSurface->IsInitialized() && m_VulkanDevice && m_VulkanDevice->IsInitialized() && m_VulkanMemoryAllocator && m_VulkanMemoryAllocator->IsInitialized();
 		const bool l_FrameReady = m_VulkanSwapchain && m_VulkanSwapchain->IsInitialized() && m_VulkanSynchronization && m_VulkanSynchronization->IsInitialized() && m_VulkanCommandPool && m_VulkanCommandPool->IsInitialized();
-		const bool l_PipelinesReady = m_DiagnosticPipeline && m_DiagnosticPipeline->IsInitialized() && m_PathtracePipeline && m_PathtracePipeline->IsInitialized() && m_ToneMapPipeline && m_ToneMapPipeline->IsInitialized();
+		const bool l_PipelinesReady = m_DiagnosticPipeline && m_DiagnosticPipeline->IsInitialized() && m_PathtracePipeline && m_PathtracePipeline->IsInitialized() && m_ToneMapPipeline && m_ToneMapPipeline->IsInitialized() && m_DisplayPipeline && m_DisplayPipeline->IsInitialized() && m_DisplaySampler != VK_NULL_HANDLE;
+		const bool l_UIReady = !m_UIEnabled || (m_UIBackend && m_UIBackend->IsInitialized());
 		const bool l_ViewReady = m_RenderView && m_RenderView->IsInitialized();
 
-		return l_CoreReady && l_FrameReady && l_PipelinesReady && l_ViewReady;
+		return l_CoreReady && l_FrameReady && l_PipelinesReady && l_UIReady && l_ViewReady;
 	}
 
 	RenderOutcome VulkanRenderer::Render(const RenderRequest& request)
@@ -321,6 +345,13 @@ namespace Engine
 			{
 				case SwapchainStatus::Success:
 				{
+					// The display and UI pipelines were built against the format the surface offered at initialization, a surface that changes its mind is not recovered from here
+					if (m_VulkanSwapchain->GetImageFormat() != m_DisplayPipeline->GetColorFormat())
+					{
+						PT_CORE_CRITICAL("The swapchain format changed from {} to {} on recreate, the display pipelines no longer match it", static_cast<int>(m_DisplayPipeline->GetColorFormat()), static_cast<int>(m_VulkanSwapchain->GetImageFormat()));
+
+						return FailFrame(l_Frame, "recreating the swapchain", VK_ERROR_FORMAT_NOT_SUPPORTED);
+					}
 					break;
 				}
 				case SwapchainStatus::Deferred:
@@ -418,7 +449,7 @@ namespace Engine
 		l_Frame.AcquireStage = FrameRecord::Stage::Acquired;
 		m_VulkanSynchronization->MarkAcquirePending();
 
-		// 7. Record the present batch: the tone map from the view's output into the swapchain image
+		// 7. Record the present batch: the display pass or the UI pass into the swapchain image, both sample the display texture the view batch tone mapped
 		const uint32_t l_PresentCommandBufferIndex = GetPresentCommandBufferIndex(l_Frame.FrameSlot);
 		VkCommandBuffer l_PresentCommandBuffer = m_VulkanCommandPool->GetCommandBuffer(l_PresentCommandBufferIndex);
 
@@ -613,7 +644,7 @@ namespace Engine
 		const FrameResources& l_Slot = m_FrameResources[frameSlot];
 		VulkanImage& l_Output = m_RenderView->GetOutputImage();
 
-		// 1. The previous present batch fetched the output image, the compute write waits for it. Contents are overwritten in full, so the old ones are discarded regardless of the tracked layout
+		// 1. The previous view batch's tone map fetched the output image, the compute write waits for it. Contents are overwritten in full, so the old ones are discarded regardless of the tracked layout
 		l_Output.RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true);
 
 		// The descriptor writes go straight into the command buffer so no descriptor set outlives the recording. The slot's buffers were filled before the acquire
@@ -750,55 +781,22 @@ namespace Engine
 			vkCmdDispatch(commandBuffer, DivideRoundingUp(l_Extent.width, k_DiagnosticWorkgroupSize), DivideRoundingUp(l_Extent.height, k_DiagnosticWorkgroupSize), 1);
 		}
 
-		// 3. The view's writes become visible to the present batch's sampled read, which follows on the same queue in submission order
+		// 3. The view's writes become visible to the tone map's sampled read below
 		l_Output.RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
 
-		return VK_SUCCESS;
-	}
+		// 4. Tone map into the display texture at the view extent: exposure and the ACES curve turn the linear output into sRGB display values. The previous present batch sampled the texture in its fragment stage, and it is overwritten in full
+		VulkanImage& l_Display = m_RenderView->GetDisplayImage();
+		l_Display.RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, true);
 
-	VkResult VulkanRenderer::RecordPresentFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderRequest& request)
-	{
-		VkImage l_SwapchainImage = m_VulkanSwapchain->GetImage(imageIndex);
-		const VkExtent2D l_SwapchainExtent = m_VulkanSwapchain->GetExtent();
-		const VkExtent2D l_ViewExtent = m_RenderView->GetExtent();
-
-		// 1. The swapchain image's first access is the tone map's storage write, the acquire semaphore is waited at the compute stage so the transition starts there
-		const VkImageSubresourceRange l_ColorRange = VulkanImage::GetColorRange();
-
-		VkImageMemoryBarrier2 l_ToStorageBarrier
-		{
-			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-			.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-			.srcAccessMask = VK_ACCESS_2_NONE,
-			.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-			.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-			.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			.newLayout = VK_IMAGE_LAYOUT_GENERAL,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = l_SwapchainImage,
-			.subresourceRange = l_ColorRange,
-		};
-
-		VkDependencyInfo l_ToStorageDependency
-		{
-			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-			.imageMemoryBarrierCount = 1,
-			.pImageMemoryBarriers = &l_ToStorageBarrier,
-		};
-
-		vkCmdPipelineBarrier2(commandBuffer, &l_ToStorageDependency);
-
-		// 2. Tone map: exposure and the ACES curve turn the view's linear output into sRGB display values written straight into the swapchain image, at the swapchain's extent
 		const VkDescriptorImageInfo l_ToneMapInputInfo
 		{
-			.imageView = m_RenderView->GetOutputImage().GetView(),
+			.imageView = l_Output.GetView(),
 			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		};
 
 		const VkDescriptorImageInfo l_ToneMapOutputInfo
 		{
-			.imageView = m_VulkanSwapchain->GetImageView(imageIndex),
+			.imageView = l_Display.GetView(),
 			.imageLayout = VK_IMAGE_LAYOUT_GENERAL,
 		};
 
@@ -822,31 +820,163 @@ namespace Engine
 
 		const ToneMapParameters l_ToneMapParameters
 		{
-			.InputWidth = l_ViewExtent.width,
-			.InputHeight = l_ViewExtent.height,
-			.OutputWidth = l_SwapchainExtent.width,
-			.OutputHeight = l_SwapchainExtent.height,
+			.Width = l_Extent.width,
+			.Height = l_Extent.height,
 			.Exposure = request.Exposure,
 			.Padding0 = 0.0f,
-			.Padding1 = 0.0f,
-			.Padding2 = 0.0f,
 		};
 
 		m_ToneMapPipeline->Bind(commandBuffer);
 		m_ToneMapPipeline->PushDescriptors(commandBuffer, l_ToneMapDescriptorWrites);
 		m_ToneMapPipeline->PushConstants(commandBuffer, &l_ToneMapParameters, sizeof(l_ToneMapParameters));
 
-		vkCmdDispatch(commandBuffer, DivideRoundingUp(l_SwapchainExtent.width, k_ToneMapWorkgroupSize), DivideRoundingUp(l_SwapchainExtent.height, k_ToneMapWorkgroupSize), 1);
+		vkCmdDispatch(commandBuffer, DivideRoundingUp(l_Extent.width, k_ToneMapWorkgroupSize), DivideRoundingUp(l_Extent.height, k_ToneMapWorkgroupSize), 1);
 
-		// 3. Presentation engine reads are made visible through the render finished semaphore, the barrier only changes layout
+		// 5. From here the display texture is sampled by fragment shaders: the display pass or the UI pass in the present batch, which follows on the same queue in submission order
+		l_Display.RecordTransition(commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+
+		return VK_SUCCESS;
+	}
+
+	VkResult VulkanRenderer::RecordPresentFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderRequest& request)
+	{
+		VkImage l_SwapchainImage = m_VulkanSwapchain->GetImage(imageIndex);
+		VkImageView l_SwapchainView = m_VulkanSwapchain->GetImageView(imageIndex);
+		const VkExtent2D l_SwapchainExtent = m_VulkanSwapchain->GetExtent();
+
+		if (l_SwapchainImage == VK_NULL_HANDLE || l_SwapchainView == VK_NULL_HANDLE)
+		{
+			// Closed by construction since Step 1, kept as the cheap guard the Step 4 leftovers asked for
+			PT_CORE_ERROR("Swapchain image {} has no image or view to render into", imageIndex);
+
+			return VK_ERROR_INITIALIZATION_FAILED;
+		}
+
+		// 1. The swapchain image's first access is the colour attachment write, the acquire semaphore is waited at that stage so the transition starts there
+		const VkImageSubresourceRange l_ColorRange = VulkanImage::GetColorRange();
+
+		VkImageMemoryBarrier2 l_ToAttachmentBarrier
+		{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.srcAccessMask = VK_ACCESS_2_NONE,
+			.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = l_SwapchainImage,
+			.subresourceRange = l_ColorRange,
+		};
+
+		VkDependencyInfo l_ToAttachmentDependency
+		{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &l_ToAttachmentBarrier,
+		};
+
+		vkCmdPipelineBarrier2(commandBuffer, &l_ToAttachmentDependency);
+
+		// 2. One dynamic rendering pass over the whole image. A view that fills the window leaves nothing of the previous contents, so the load is a don't-care, the UI on its own starts from a cleared image
+		const bool l_DrawView = request.DrawViewToWindow;
+
+		const VkRenderingAttachmentInfo l_ColorAttachment
+		{
+			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+			.imageView = l_SwapchainView,
+			.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			.loadOp = l_DrawView ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.clearValue = {.color = {.float32 = { k_UIClearColor[0], k_UIClearColor[1], k_UIClearColor[2], k_UIClearColor[3] } } },
+		};
+
+		const VkRenderingInfo l_RenderingInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+			.renderArea = {.offset = { 0, 0 }, .extent = l_SwapchainExtent },
+			.layerCount = 1,
+			.colorAttachmentCount = 1,
+			.pColorAttachments = &l_ColorAttachment,
+		};
+
+		vkCmdBeginRendering(commandBuffer, &l_RenderingInfo);
+
+		if (l_DrawView)
+		{
+			// 3. The fullscreen triangle samples the display texture the view batch tone mapped, filtered to the swapchain extent
+			const VkViewport l_Viewport
+			{
+				.x = 0.0f,
+				.y = 0.0f,
+				.width = static_cast<float>(l_SwapchainExtent.width),
+				.height = static_cast<float>(l_SwapchainExtent.height),
+				.minDepth = 0.0f,
+				.maxDepth = 1.0f,
+			};
+
+			const VkRect2D l_Scissor
+			{
+				.offset = { 0, 0 },
+				.extent = l_SwapchainExtent,
+			};
+
+			vkCmdSetViewport(commandBuffer, 0, 1, &l_Viewport);
+			vkCmdSetScissor(commandBuffer, 0, 1, &l_Scissor);
+
+			const VkDescriptorImageInfo l_DisplayImageInfo
+			{
+				.imageView = m_RenderView->GetDisplayImage().GetView(),
+				.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			};
+
+			const VkDescriptorImageInfo l_DisplaySamplerInfo
+			{
+				.sampler = m_DisplaySampler,
+			};
+
+			const std::array<VkWriteDescriptorSet, 2> l_DisplayDescriptorWrites
+			{ {
+				{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstBinding = 0,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+					.pImageInfo = &l_DisplayImageInfo,
+				},
+				{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstBinding = 1,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+					.pImageInfo = &l_DisplaySamplerInfo,
+				},
+			} };
+
+			m_DisplayPipeline->Bind(commandBuffer);
+			m_DisplayPipeline->PushDescriptors(commandBuffer, l_DisplayDescriptorWrites);
+
+			vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+		}
+
+		// 4. The UI draws over the view or over the cleared image. The backend sets its own viewport and scissor and records nothing without draw data
+		if (m_UIBackend)
+		{
+			m_UIBackend->Record(commandBuffer);
+		}
+
+		vkCmdEndRendering(commandBuffer);
+
+		// 5. Presentation engine reads are made visible through the render finished semaphore, the barrier only changes layout
 		VkImageMemoryBarrier2 l_ToPresentBarrier
 		{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-			.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-			.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+			.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
 			.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 			.dstAccessMask = VK_ACCESS_2_NONE,
-			.oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+			.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 			.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -1096,12 +1226,132 @@ namespace Engine
 		}
 	}
 
+	VkResult VulkanRenderer::CreateDisplayResources()
+	{
+		PT_CORE_INFO("------- CREATING DISPLAY RESOURCES -------");
+
+		// The module only has to outlive pipeline creation, both entry points come from it
+		VulkanShaderModule l_Shader;
+		VkResult l_Result = l_Shader.Initialize(*m_VulkanDevice, FileSystem::GetShaderDirectory() / k_DisplayShaderFile);
+		if (l_Result != VK_SUCCESS)
+		{
+			return l_Result;
+		}
+
+		const std::array<VkDescriptorSetLayoutBinding, 2> l_Bindings
+		{ {
+			{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+			},
+			{
+				.binding = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+			},
+		} };
+
+		// The swapchain chose its format before any deferral, so the pipeline can be built against it now
+		const VulkanGraphicsPipelineSpecification l_PipelineSpecification
+		{
+			.Shader = &l_Shader,
+			.VertexEntryPoint = k_DisplayVertexEntryPoint,
+			.FragmentEntryPoint = k_DisplayFragmentEntryPoint,
+			.ColorFormat = m_VulkanSwapchain->GetImageFormat(),
+			.Bindings = l_Bindings,
+			.DebugName = "display",
+		};
+
+		m_DisplayPipeline = std::make_unique<VulkanGraphicsPipeline>();
+		l_Result = m_DisplayPipeline->Initialize(*m_VulkanDevice, l_PipelineSpecification);
+		if (l_Result != VK_SUCCESS)
+		{
+			DestroyDisplayResources();
+
+			return l_Result;
+		}
+
+		l_Shader.Shutdown();
+
+		// Linear filtering with clamped edges: the view may render below the window size, and the swapchain extent is rarely a multiple of it
+		const VkSamplerCreateInfo l_SamplerCreateInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+			.magFilter = VK_FILTER_LINEAR,
+			.minFilter = VK_FILTER_LINEAR,
+			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+			.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.anisotropyEnable = VK_FALSE,
+			.compareEnable = VK_FALSE,
+			.minLod = 0.0f,
+			.maxLod = 0.0f,
+			.unnormalizedCoordinates = VK_FALSE,
+		};
+
+		l_Result = vkCreateSampler(m_VulkanDevice->GetHandle(), &l_SamplerCreateInfo, nullptr, &m_DisplaySampler);
+		if (l_Result != VK_SUCCESS)
+		{
+			PT_CORE_ERROR("Failed vkCreateSampler for the display pass: {}", VulkanUtilities::ResultToString(l_Result));
+
+			m_DisplaySampler = VK_NULL_HANDLE;
+			DestroyDisplayResources();
+
+			return l_Result;
+		}
+
+		PT_CORE_INFO("------- DISPLAY RESOURCES CREATED -------");
+
+		return VK_SUCCESS;
+	}
+
+	void VulkanRenderer::DestroyDisplayResources()
+	{
+		if (m_DisplaySampler != VK_NULL_HANDLE)
+		{
+			vkDestroySampler(m_VulkanDevice->GetHandle(), m_DisplaySampler, nullptr);
+			m_DisplaySampler = VK_NULL_HANDLE;
+		}
+
+		if (m_DisplayPipeline)
+		{
+			m_DisplayPipeline->Shutdown();
+			m_DisplayPipeline.reset();
+		}
+	}
+
+	VkResult VulkanRenderer::CreateUIBackend()
+	{
+		m_UIBackend = std::make_unique<VulkanUIBackend>();
+
+		const VkResult l_Result = m_UIBackend->Initialize(*m_VulkanInstance, *m_VulkanDevice, m_VulkanSwapchain->GetImageFormat());
+		if (l_Result != VK_SUCCESS)
+		{
+			DestroyUIBackend();
+		}
+
+		return l_Result;
+	}
+
+	void VulkanRenderer::DestroyUIBackend()
+	{
+		if (m_UIBackend)
+		{
+			m_UIBackend->Shutdown();
+			m_UIBackend.reset();
+		}
+	}
+
 	VkResult VulkanRenderer::CreateRenderView()
 	{
-		// The images are created by the first Render(), once a request names the extent
+		// The images are created by the first Render(), once a request names the extent. The view registers its display texture with the UI backend when there is one
 		m_RenderView = std::make_unique<VulkanRenderView>();
 
-		const VkResult l_Result = m_RenderView->Initialize(*m_VulkanDevice, *m_VulkanMemoryAllocator);
+		const VkResult l_Result = m_RenderView->Initialize(*m_VulkanDevice, *m_VulkanMemoryAllocator, m_UIBackend.get());
 		if (l_Result != VK_SUCCESS)
 		{
 			DestroyRenderView();
@@ -1211,6 +1461,16 @@ namespace Engine
 		}
 	}
 
+	uint64_t VulkanRenderer::GetViewTextureId() const
+	{
+		if (!m_RenderView)
+		{
+			return 0;
+		}
+
+		return m_RenderView->GetDisplayTextureId();
+	}
+
 	void VulkanRenderer::Shutdown()
 	{
 		if (!m_VolkInitialized && !m_VulkanInstance)
@@ -1232,6 +1492,8 @@ namespace Engine
 
 		DestroySceneResources();
 		DestroyRenderView();
+		DestroyUIBackend();
+		DestroyDisplayResources();
 		DestroyToneMapResources();
 		DestroyPathtraceResources();
 		DestroyDiagnosticResources();
@@ -1280,6 +1542,7 @@ namespace Engine
 
 		ShutdownVolk();
 
+		m_UIEnabled = false;
 		m_Fatal = false;
 
 		PT_CORE_INFO("------- VULKAN RENDERER SHUTDOWN COMPLETE -------");

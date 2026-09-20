@@ -87,6 +87,7 @@ namespace Engine
 			const struct { const char* Name; VkBool32 Supported; } l_RequiredFeatures[] =
 			{
 				{ "shaderStorageImageWriteWithoutFormat", l_SupportedFeatures.features.shaderStorageImageWriteWithoutFormat },
+				{ "shaderDrawParameters", l_Supported11.shaderDrawParameters },
 				{ "descriptorIndexing", l_Supported12.descriptorIndexing },
 				{ "scalarBlockLayout", l_Supported12.scalarBlockLayout },
 				{ "timelineSemaphore", l_Supported12.timelineSemaphore },
@@ -363,10 +364,17 @@ namespace Engine
 			.bufferDeviceAddress = VK_TRUE,
 		};
 
+		VkPhysicalDeviceVulkan11Features l_Enabled11
+		{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+			.pNext = &l_Enabled12,
+			.shaderDrawParameters = VK_TRUE,
+		};
+
 		VkPhysicalDeviceFeatures2 l_EnabledFeatures
 		{
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-			.pNext = &l_Enabled12,
+			.pNext = &l_Enabled11,
 			.features =
 			{
 				.shaderStorageImageWriteWithoutFormat = VK_TRUE,

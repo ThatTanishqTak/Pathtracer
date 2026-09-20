@@ -125,6 +125,7 @@ namespace Engine
 		m_ShouldClose = false;
 		m_FramebufferResized = false;
 		m_EventCallback = nullptr;
+		m_RawEventCallback = nullptr;
 
 		PT_CORE_INFO("------- WINDOW SHUTDOWN COMPLETE -------");
 	}
@@ -132,6 +133,11 @@ namespace Engine
 	void Window::SetEventCallback(EventCallback callback)
 	{
 		m_EventCallback = std::move(callback);
+	}
+
+	void Window::SetRawEventCallback(RawEventCallback callback)
+	{
+		m_RawEventCallback = std::move(callback);
 	}
 
 	void Window::Dispatch(const InputEvent& event)
@@ -144,6 +150,12 @@ namespace Engine
 
 	void Window::HandleEvent(const SDL_Event& event)
 	{
+		// The UI backend sees the raw event first, whatever the translation below makes of it
+		if (m_RawEventCallback)
+		{
+			m_RawEventCallback(event);
+		}
+
 		// Events carrying a window ID are dropped unless they belong to this window
 		const auto l_IsThisWindow = [this](SDL_WindowID windowID)
 		{

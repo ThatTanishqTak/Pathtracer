@@ -28,6 +28,7 @@ namespace Engine
 	{
 	public:
 		using EventCallback = std::function<void(const InputEvent&)>;
+		using RawEventCallback = std::function<void(const SDL_Event&)>;
 
 		Window();
 		~Window();
@@ -42,6 +43,9 @@ namespace Engine
 
 		// Receives every translated input event, close and resize are still tracked by the window itself
 		void SetEventCallback(EventCallback callback);
+
+		// Internal hook for the UI layer: receives every raw SDL event before it is translated, including the ones the translation drops. The engine input keeps being built from the same events
+		void SetRawEventCallback(RawEventCallback callback);
 
 		void PollEvents();
 		void WaitEvents();
@@ -75,6 +79,7 @@ namespace Engine
 		bool m_FramebufferResized = false;
 
 		EventCallback m_EventCallback;
+		RawEventCallback m_RawEventCallback;
 
 		WindowSpecification m_Specification;
 	};

@@ -2,6 +2,7 @@
 
 #include "Engine/Renderer/RenderRequest.hpp"
 
+#include <cstdint>
 #include <memory>
 
 namespace Engine
@@ -26,13 +27,15 @@ namespace Engine
 		Renderer(const Renderer&) = delete;
 		Renderer& operator=(const Renderer&) = delete;
 
-		void Initialize(const Window& window);
+		void Initialize(const Window& window, bool enableUI = false);
 		void Shutdown();
 
 		bool IsInitialized() const;
 		RenderOutcome Render(const RenderRequest& request);
 
 		void OnFramebufferResized();
+
+		uint64_t GetViewTextureId() const;
 
 	private:
 		std::unique_ptr<VulkanRenderer> m_VulkanRenderer;

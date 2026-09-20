@@ -2,6 +2,7 @@
 
 #include "Engine/Input/Input.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -16,11 +17,13 @@ namespace Engine
 		int WindowHeight = 1080;
 
 		bool WindowResizable = false;
+		bool EnableUI = false;
 	};
 
 	class ApplicationClient;
 	class Platform;
 	class Renderer;
+	class UILayer;
 	class Window;
 
 	class Application
@@ -51,6 +54,9 @@ namespace Engine
 
 		std::filesystem::path GetExecutableDirectory() const;
 
+		bool IsUIEnabled() const;
+		uint64_t GetViewTextureId() const;
+
 		const ApplicationSpecification& GetSpecification() const;
 
 	private:
@@ -61,6 +67,7 @@ namespace Engine
 
 		std::unique_ptr<Platform> m_Platform;
 		std::unique_ptr<Window> m_Window;
+		std::unique_ptr<UILayer> m_UILayer;
 		std::unique_ptr<Renderer> m_Renderer;
 		std::unique_ptr<ApplicationClient> m_Client;
 

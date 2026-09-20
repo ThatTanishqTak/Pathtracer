@@ -84,3 +84,23 @@ add_subdirectory(volk SYSTEM)
 # VMA: Vulkan memory allocator, header-only interface target
 add_subdirectory(VulkanMemoryAllocator SYSTEM)
 # --------------
+
+# Dear ImGui --------------
+set(IMGUI_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/imgui")
+
+add_library(imgui STATIC
+    "${IMGUI_DIRECTORY}/imgui.cpp"
+    "${IMGUI_DIRECTORY}/imgui_demo.cpp"
+    "${IMGUI_DIRECTORY}/imgui_draw.cpp"
+    "${IMGUI_DIRECTORY}/imgui_tables.cpp"
+    "${IMGUI_DIRECTORY}/imgui_widgets.cpp"
+    "${IMGUI_DIRECTORY}/backends/imgui_impl_sdl3.cpp"
+    "${IMGUI_DIRECTORY}/backends/imgui_impl_vulkan.cpp"
+)
+
+target_include_directories(imgui SYSTEM PUBLIC "${IMGUI_DIRECTORY}" "${IMGUI_DIRECTORY}/backends")
+target_compile_definitions(imgui PUBLIC IMGUI_IMPL_VULKAN_USE_VOLK IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
+target_link_libraries(imgui PUBLIC SDL3::SDL3 volk::volk)
+
+add_library(imgui::imgui ALIAS imgui)
+# --------------

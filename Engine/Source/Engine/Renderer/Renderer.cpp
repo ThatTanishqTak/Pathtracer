@@ -9,7 +9,7 @@ namespace Engine
 	Renderer::Renderer() = default;
 	Renderer::~Renderer() = default;
 
-	void Renderer::Initialize(const Window& window)
+	void Renderer::Initialize(const Window& window, bool enableUI)
 	{
 		if (m_VulkanRenderer)
 		{
@@ -21,7 +21,7 @@ namespace Engine
 		PT_CORE_INFO("------- INITIALIZING RENDERER -------");
 
 		m_VulkanRenderer = std::make_unique<VulkanRenderer>();
-		m_VulkanRenderer->Initialize(window);
+		m_VulkanRenderer->Initialize(window, enableUI);
 		if (!m_VulkanRenderer->IsInitialized())
 		{
 			PT_CORE_ERROR("------- RENDERER INITIALIZATION FAILED -------");
@@ -70,5 +70,15 @@ namespace Engine
 		{
 			m_VulkanRenderer->OnFramebufferResized();
 		}
+	}
+
+	uint64_t Renderer::GetViewTextureId() const
+	{
+		if (!m_VulkanRenderer)
+		{
+			return 0;
+		}
+
+		return m_VulkanRenderer->GetViewTextureId();
 	}
 }
