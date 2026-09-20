@@ -2,6 +2,7 @@
 
 #include "Engine/Input/Input.hpp"
 
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -47,6 +48,8 @@ namespace Engine
 		int GetWindowHeight() const;
 		int GetFramebufferWidth() const;
 		int GetFramebufferHeight() const;
+
+		std::filesystem::path GetExecutableDirectory() const;
 
 		const ApplicationSpecification& GetSpecification() const;
 

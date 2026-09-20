@@ -3,14 +3,18 @@
 #include "Engine/Engine.hpp"
 
 #include "Sandbox/FirstPersonController.hpp"
+#include "Sandbox/SandboxOptions.hpp"
 
 #include <cstdint>
+#include <filesystem>
 
 namespace Sandbox
 {
 	class SandboxClient final : public Engine::ApplicationClient
 	{
 	public:
+		explicit SandboxClient(SandboxOptions options);
+
 		void OnStart(Engine::ApplicationServices& services) override;
 		void OnStop() noexcept override;
 		void OnEvent(const Engine::InputEvent& event) override;
@@ -18,6 +22,13 @@ namespace Sandbox
 		Engine::RenderRequest GetRenderRequest() const override;
 
 	private:
+		// A relative path is anchored at the asset root, an absolute one is taken as given
+		std::filesystem::path ResolveScenePath(const std::filesystem::path& path) const;
+
+		// Loading is a transaction: on failure the current scene, demo or file, is exactly what it was. Success remembers the path for F5 and reselects the first entity
+		bool LoadScene(const std::filesystem::path& path);
+		void SaveScene();
+
 		void BuildDemoScene();
 		void CreateSphere();
 		void DestroySelected();
@@ -26,6 +37,13 @@ namespace Sandbox
 		void RecolorSelected();
 
 		Engine::ApplicationServices* m_Services = nullptr;
+
+		// Where the scene came from and where F5 writes it back to. The default is what a fresh Sandbox saves the demo scene as
+		static constexpr const char* k_DefaultScenePath = "Scenes/FirstScene.scene.json";
+
+		SandboxOptions m_Options;
+		std::filesystem::path m_AssetRoot;
+		std::filesystem::path m_ScenePath; // Empty until a scene was loaded or saved
 
 		// The controller owns the camera, the client only chooses the lens
 		static constexpr float k_VerticalFieldOfView = Engine::Math::ToRadians(60.0f);

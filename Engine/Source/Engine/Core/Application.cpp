@@ -1,6 +1,7 @@
 #include "Engine/Core/Application.hpp"
 
 #include "Engine/Core/ApplicationClient.hpp"
+#include "Engine/Core/FileSystem.hpp"
 #include "Engine/Platform/Platform.hpp"
 #include "Engine/Window/Window.hpp"
 #include "Engine/Renderer/Renderer.hpp"
@@ -56,6 +57,11 @@ namespace Engine
 	int ApplicationServices::GetFramebufferHeight() const
 	{
 		return m_Application->GetFramebufferHeight();
+	}
+
+	std::filesystem::path ApplicationServices::GetExecutableDirectory() const
+	{
+		return m_Application->GetExecutableDirectory();
 	}
 
 	Application::Application() = default;
@@ -448,6 +454,11 @@ namespace Engine
 		}
 
 		return l_Height;
+	}
+
+	std::filesystem::path Application::GetExecutableDirectory() const
+	{
+		return FileSystem::GetExecutableDirectory();
 	}
 
 	const ApplicationSpecification& Application::GetSpecification() const

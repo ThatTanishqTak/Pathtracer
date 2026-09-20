@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Engine
@@ -27,9 +28,16 @@ namespace Engine
 	public:
 		Scene();
 
+		// Display name, scene content like everything else here
+		const std::string& GetName() const { return m_Name; }
+		void SetName(std::string name) { m_Name = std::move(name); }
+
 		// The reference stays valid until the next CreateEntity or DestroyEntity call, keep the Id instead
 		Entity& CreateEntity(std::string name);
 		bool DestroyEntity(EntityId id);
+
+		// Inserts an entity with the Id it already carries, for scene files and undo. Returns null for Invalid or an Id already in use, otherwise moves the next-Id counter past it so nothing created later collides. The pointer is valid until the next Create, Restore or Destroy call
+		Entity* RestoreEntity(Entity entity);
 
 		Entity* FindEntity(EntityId id);
 		const Entity* FindEntity(EntityId id) const;
@@ -39,10 +47,19 @@ namespace Engine
 		Material& CreateMaterial(std::string name);
 		bool DestroyMaterial(MaterialId id); // Entities that used it fall back to MaterialId::Invalid
 
+		// The material twin of RestoreEntity
+		Material* RestoreMaterial(Material material);
+
 		Material* FindMaterial(MaterialId id);
 		const Material* FindMaterial(MaterialId id) const;
 		const std::vector<Material>& GetMaterials() const { return m_Materials; }
 		uint32_t CountMaterialUsers(MaterialId id) const;
+
+		// The Ids the next Create calls hand out. A scene file stores them so a loaded scene never reuses an Id that a deleted entity once had, Reserve only ever raises them
+		uint64_t GetNextEntityId() const { return m_NextEntityId; }
+		uint64_t GetNextMaterialId() const { return m_NextMaterialId; }
+		void ReserveEntityIds(uint64_t nextId);
+		void ReserveMaterialIds(uint64_t nextId);
 
 		PlayerSpawn& GetPlayerSpawn() { return m_PlayerSpawn; }
 		const PlayerSpawn& GetPlayerSpawn() const { return m_PlayerSpawn; }
@@ -55,6 +72,8 @@ namespace Engine
 		void MarkRadianceChanged();
 
 	private:
+		std::string m_Name;
+
 		std::vector<Entity> m_Entities;
 		std::vector<Material> m_Materials;
 

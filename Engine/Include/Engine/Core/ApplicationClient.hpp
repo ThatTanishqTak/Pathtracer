@@ -4,6 +4,8 @@
 #include "Engine/Input/Input.hpp"
 #include "Engine/Renderer/RenderRequest.hpp"
 
+#include <filesystem>
+
 namespace Engine
 {
 	class Application;
@@ -22,6 +24,8 @@ namespace Engine
 		int GetWindowHeight() const;
 		int GetFramebufferWidth() const;
 		int GetFramebufferHeight() const;
+
+		std::filesystem::path GetExecutableDirectory() const;
 
 	private:
 		Application* m_Application = nullptr;

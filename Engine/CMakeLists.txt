@@ -95,6 +95,7 @@ target_link_libraries(${TARGET_NAME}
         volk::volk
         GPUOpen::VulkanMemoryAllocator
         spdlog
+        nlohmann_json::nlohmann_json
 )
 
 # Engine properties

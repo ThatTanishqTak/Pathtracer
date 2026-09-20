@@ -1,7 +1,9 @@
 #include "Engine/Scene/Scene.hpp"
 
 #include <algorithm>
+#include <algorithm>
 #include <atomic>
+#include <limits>
 #include <utility>
 
 namespace Engine
@@ -15,6 +17,9 @@ namespace Engine
 		{
 			return s_NextRadianceRevision.fetch_add(1, std::memory_order_relaxed);
 		}
+
+		// The largest Id a Restore accepts, one past it must still be a valid counter value
+		constexpr uint64_t k_MaxRestorableId = std::numeric_limits<uint64_t>::max() - 1;
 	}
 
 	Scene::Scene()
@@ -47,6 +52,24 @@ namespace Engine
 		MarkRadianceChanged();
 
 		return true;
+	}
+
+	Entity* Scene::RestoreEntity(Entity entity)
+	{
+		const uint64_t l_Id = std::to_underlying(entity.Id);
+		if (entity.Id == EntityId::Invalid || l_Id > k_MaxRestorableId || FindEntity(entity.Id) != nullptr)
+		{
+			return nullptr;
+		}
+
+		// Never lowered: a file that stores a counter below its largest Id still gets a counter past every Id present
+		m_NextEntityId = std::max(m_NextEntityId, l_Id + 1);
+
+		Entity& l_Entity = m_Entities.emplace_back(std::move(entity));
+
+		MarkRadianceChanged();
+
+		return &l_Entity;
 	}
 
 	Entity* Scene::FindEntity(EntityId id)
@@ -98,6 +121,23 @@ namespace Engine
 		return true;
 	}
 
+	Material* Scene::RestoreMaterial(Material material)
+	{
+		const uint64_t l_Id = std::to_underlying(material.Id);
+		if (material.Id == MaterialId::Invalid || l_Id > k_MaxRestorableId || FindMaterial(material.Id) != nullptr)
+		{
+			return nullptr;
+		}
+
+		m_NextMaterialId = std::max(m_NextMaterialId, l_Id + 1);
+
+		Material& l_Material = m_Materials.emplace_back(std::move(material));
+
+		MarkRadianceChanged();
+
+		return &l_Material;
+	}
+
 	Material* Scene::FindMaterial(MaterialId id)
 	{
 		const auto l_Found = std::find_if(m_Materials.begin(), m_Materials.end(), [id](const Material& material) { return material.Id == id; });
@@ -115,6 +155,16 @@ namespace Engine
 	uint32_t Scene::CountMaterialUsers(MaterialId id) const
 	{
 		return static_cast<uint32_t>(std::count_if(m_Entities.begin(), m_Entities.end(), [id](const Entity& entity) { return entity.Material == id; }));
+	}
+
+	void Scene::ReserveEntityIds(uint64_t nextId)
+	{
+		m_NextEntityId = std::max(m_NextEntityId, nextId);
+	}
+
+	void Scene::ReserveMaterialIds(uint64_t nextId)
+	{
+		m_NextMaterialId = std::max(m_NextMaterialId, nextId);
 	}
 
 	void Scene::MarkRadianceChanged()

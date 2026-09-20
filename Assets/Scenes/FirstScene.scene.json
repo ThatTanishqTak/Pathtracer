@@ -1,0 +1,214 @@
+{
+	"schemaVersion": 1,
+	"name": "First scene",
+	"nextEntityId": "5",
+	"nextMaterialId": "5",
+	"environment": {
+		"radiance": [
+			0.05,
+			0.07,
+			0.1
+		]
+	},
+	"playerSpawn": {
+		"position": [
+			0.0,
+			0.5,
+			6.0
+		],
+		"orientation": [
+			0.0,
+			0.0,
+			0.0,
+			1.0
+		]
+	},
+	"materials": [
+		{
+			"id": "1",
+			"name": "Floor",
+			"type": "diffuse",
+			"baseColor": [
+				0.7,
+				0.7,
+				0.7
+			],
+			"emissionColor": [
+				1.0,
+				1.0,
+				1.0
+			],
+			"emissionStrength": 0.0
+		},
+		{
+			"id": "2",
+			"name": "Red",
+			"type": "diffuse",
+			"baseColor": [
+				0.8,
+				0.2,
+				0.2
+			],
+			"emissionColor": [
+				1.0,
+				1.0,
+				1.0
+			],
+			"emissionStrength": 0.0
+		},
+		{
+			"id": "3",
+			"name": "Green",
+			"type": "diffuse",
+			"baseColor": [
+				0.2,
+				0.8,
+				0.2
+			],
+			"emissionColor": [
+				1.0,
+				1.0,
+				1.0
+			],
+			"emissionStrength": 0.0
+		},
+		{
+			"id": "4",
+			"name": "Light",
+			"type": "emissive",
+			"baseColor": [
+				0.0,
+				0.0,
+				0.0
+			],
+			"emissionColor": [
+				1.0,
+				0.95,
+				0.9
+			],
+			"emissionStrength": 8.0
+		}
+	],
+	"entities": [
+		{
+			"id": "1",
+			"name": "Floor",
+			"visible": true,
+			"transform": {
+				"translation": [
+					0.0,
+					-1.0,
+					0.0
+				],
+				"rotation": [
+					-0.70710677,
+					-0.0,
+					-0.0,
+					0.70710677
+				],
+				"scale": [
+					1.0,
+					1.0,
+					1.0
+				]
+			},
+			"geometry": {
+				"type": "quad",
+				"radius": 0.5,
+				"width": 10.0,
+				"height": 10.0
+			},
+			"material": "1"
+		},
+		{
+			"id": "2",
+			"name": "Centre sphere",
+			"visible": true,
+			"transform": {
+				"translation": [
+					0.0,
+					0.0,
+					0.0
+				],
+				"rotation": [
+					0.0,
+					0.0,
+					0.0,
+					1.0
+				],
+				"scale": [
+					1.0,
+					1.0,
+					1.0
+				]
+			},
+			"geometry": {
+				"type": "sphere",
+				"radius": 1.0,
+				"width": 1.0,
+				"height": 1.0
+			},
+			"material": "2"
+		},
+		{
+			"id": "3",
+			"name": "Side sphere",
+			"visible": true,
+			"transform": {
+				"translation": [
+					-2.0,
+					-0.5,
+					0.0
+				],
+				"rotation": [
+					0.0,
+					0.0,
+					0.0,
+					1.0
+				],
+				"scale": [
+					1.0,
+					0.6,
+					1.0
+				]
+			},
+			"geometry": {
+				"type": "sphere",
+				"radius": 0.5,
+				"width": 1.0,
+				"height": 1.0
+			},
+			"material": "3"
+		},
+		{
+			"id": "4",
+			"name": "Ceiling light",
+			"visible": true,
+			"transform": {
+				"translation": [
+					0.0,
+					3.0,
+					0.0
+				],
+				"rotation": [
+					0.70710677,
+					0.0,
+					0.0,
+					0.70710677
+				],
+				"scale": [
+					1.0,
+					1.0,
+					1.0
+				]
+			},
+			"geometry": {
+				"type": "quad",
+				"radius": 0.5,
+				"width": 2.0,
+				"height": 2.0
+			},
+			"material": "4"
+		}
+	]
+}

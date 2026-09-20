@@ -30,5 +30,12 @@ add_subdirectory(Vendor)
 add_subdirectory(Engine)
 add_subdirectory(Sandbox)
 
+# Project content next to the executables, so scene paths resolve from the build output like the shaders do. Editor joins the dependency in Step 10
+add_custom_target(Assets COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${CMAKE_SOURCE_DIR}/Assets" "${OUTPUT_BASE}/Assets"
+    COMMENT "Copying Assets next to the executables"
+    VERBATIM
+)
+add_dependencies(Sandbox Assets)
+
 # Visual Studio startup project
 set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY VS_STARTUP_PROJECT Sandbox)

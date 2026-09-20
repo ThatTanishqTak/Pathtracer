@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <format>
+#include <system_error>
 #include <utility>
 
 namespace Sandbox
@@ -59,6 +60,11 @@ namespace Sandbox
 		} };
 	}
 
+	SandboxClient::SandboxClient(SandboxOptions options) : m_Options(std::move(options))
+	{
+
+	}
+
 	void SandboxClient::OnStart(Engine::ApplicationServices& services)
 	{
 		m_Services = &services;
@@ -67,13 +73,41 @@ namespace Sandbox
 		PT_APP_INFO("Controls: click captures the mouse and looks around, W A S D walk, Shift runs, Escape releases the mouse and closes when it is already released, standing still lets the image converge");
 		PT_APP_INFO("Render: 1-5 select a diagnostic view, 6 the path tracer, B cycles the bounce limit, R cycles the render scale, Equals and Minus step exposure");
 		PT_APP_INFO("Scene: N creates a sphere, Backspace deletes the selected entity, Period selects the next entity, arrows move the selection on X and Z, PageUp and PageDown on Y, C recolours its material");
+		PT_APP_INFO("File: F5 saves the scene to its file, F9 reloads it and returns the player to the spawn");
 
 		if (!RunCameraChecks())
 		{
 			PT_APP_WARN("Camera checks failed, the diagnostic modes may not match the CPU camera");
 		}
 
-		BuildDemoScene();
+		// Content is anchored at the executable, not at wherever the process was started from, so a shortcut or a debugger with another working directory finds the same files
+		if (m_Options.AssetRoot.empty())
+		{
+			m_AssetRoot = m_Services->GetExecutableDirectory() / "Assets";
+		}
+		else
+		{
+			std::error_code l_Error;
+			m_AssetRoot = std::filesystem::absolute(m_Options.AssetRoot, l_Error);
+			if (l_Error)
+			{
+				PT_APP_WARN("Cannot resolve the asset root {}: {}, using it as given", m_Options.AssetRoot.string(), l_Error.message());
+				m_AssetRoot = m_Options.AssetRoot;
+			}
+		}
+
+		PT_APP_INFO("Asset root: {}", m_AssetRoot.string());
+
+		// A scene from the command line, or the demo scene when there is none or it fails. A failed file is not remembered, so F5 cannot overwrite it with the demo scene
+		if (m_Options.ScenePath.empty() || !LoadScene(ResolveScenePath(m_Options.ScenePath)))
+		{
+			if (!m_Options.ScenePath.empty())
+			{
+				PT_APP_ERROR("Falling back to the demo scene, F5 saves it to {} instead of the file that failed", ResolveScenePath(k_DefaultScenePath).string());
+			}
+
+			BuildDemoScene();
+		}
 
 		m_Settings.SamplesPerFrame = 1;
 		m_Settings.MaxBounces = k_BounceLimits[m_BounceLimitIndex];
@@ -175,6 +209,24 @@ namespace Sandbox
 			PT_APP_INFO("Exposure {:+.1f} stops ({:.3f}x)", m_ExposureStops, std::exp2(m_ExposureStops));
 		}
 
+		// The scene file: F5 writes the live scene, F9 replaces it from the file as a transaction and puts the player back at the spawn
+		if (input.WasKeyPressed(Engine::Key::F5))
+		{
+			SaveScene();
+		}
+
+		if (input.WasKeyPressed(Engine::Key::F9))
+		{
+			if (m_ScenePath.empty())
+			{
+				PT_APP_WARN("Nothing to reload, the scene has not been loaded from or saved to a file yet");
+			}
+			else if (LoadScene(m_ScenePath))
+			{
+				m_Controller.Reset(m_Scene.GetPlayerSpawn());
+			}
+		}
+
 		// Scene edits, every one goes through the Scene so the renderer sees a new radiance revision
 		if (input.WasKeyPressed(Engine::Key::N))
 		{
@@ -236,9 +288,59 @@ namespace Sandbox
 		}
 	}
 
+	std::filesystem::path SandboxClient::ResolveScenePath(const std::filesystem::path& path) const
+	{
+		if (path.is_absolute())
+		{
+			return path;
+		}
+
+		return m_AssetRoot / path;
+	}
+
+	bool SandboxClient::LoadScene(const std::filesystem::path& path)
+	{
+		// The serializer already logged every warning and the error with its field context, only the outcome is repeated here
+		const Engine::SceneFileResult l_Result = Engine::SceneSerializer::Load(path, m_Scene);
+		if (!l_Result.Succeeded)
+		{
+			PT_APP_ERROR("Scene load failed, the current scene is unchanged: {}", l_Result.Error);
+
+			return false;
+		}
+
+		m_ScenePath = path;
+
+		// The Ids in the file replace the ones that were selected, so the selection starts over at the first entity
+		m_SelectedEntity = m_Scene.GetEntities().empty() ? Engine::EntityId::Invalid : m_Scene.GetEntities().front().Id;
+
+		PT_APP_INFO("Loaded scene '{}' from {}: {} entities, {} materials, {} warning(s), revision {}", m_Scene.GetName(), path.string(), m_Scene.GetEntities().size(), m_Scene.GetMaterials().size(), l_Result.Warnings.size(), m_Scene.GetRadianceRevision());
+
+		return true;
+	}
+
+	void SandboxClient::SaveScene()
+	{
+		const std::filesystem::path l_Path = m_ScenePath.empty() ? ResolveScenePath(k_DefaultScenePath) : m_ScenePath;
+
+		const Engine::SceneFileResult l_Result = Engine::SceneSerializer::Save(m_Scene, l_Path);
+		if (!l_Result.Succeeded)
+		{
+			PT_APP_ERROR("Scene save failed, the file on disk is unchanged: {}", l_Result.Error);
+
+			return;
+		}
+
+		// From now on F9 reloads what was just written
+		m_ScenePath = l_Path;
+
+		PT_APP_INFO("Saved scene '{}' to {}: {} entities, {} materials", m_Scene.GetName(), l_Path.string(), m_Scene.GetEntities().size(), m_Scene.GetMaterials().size());
+	}
+
 	void SandboxClient::BuildDemoScene()
 	{
 		m_Scene = Engine::Scene{};
+		m_Scene.SetName("Demo scene");
 
 		// Materials first, references are captured by Id because the next Create invalidates the reference
 		Engine::MaterialId l_FloorMaterial;

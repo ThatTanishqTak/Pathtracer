@@ -48,6 +48,14 @@ set(GLM_BUILD_INSTALL OFF)
 add_subdirectory(glm SYSTEM)
 # --------------
 
+# nlohmann/json --------------
+set(JSON_BuildTests OFF)
+set(JSON_Install OFF)
+set(JSON_ImplicitConversions OFF)
+
+add_subdirectory(json SYSTEM)
+# --------------
+
 # Vulkan --------------
 find_package(Vulkan 1.4 REQUIRED GLOBAL)
 find_program(Vulkan_SLANGC_EXECUTABLE NAMES slangc

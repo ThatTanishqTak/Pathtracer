@@ -13,3 +13,6 @@
 [submodule "Vendor/glm"]
 	path = Vendor/glm
 	url = https://github.com/ThatTanishqTak/glm.git
+[submodule "Vendor/json"]
+	path = Vendor/json
+	url = https://github.com/ThatTanishqTak/json.git
