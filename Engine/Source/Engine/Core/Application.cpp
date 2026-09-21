@@ -2,6 +2,7 @@
 
 #include "Engine/Core/ApplicationClient.hpp"
 #include "Engine/Core/FileSystem.hpp"
+#include "Engine/Platform/FileDialog.hpp"
 #include "Engine/Platform/Platform.hpp"
 #include "Engine/Window/Window.hpp"
 #include "Engine/Renderer/Renderer.hpp"
@@ -75,6 +76,21 @@ namespace Engine
 		return m_Application->GetViewTextureId();
 	}
 
+	bool ApplicationServices::ShowFileDialog(const FileDialogRequest& request)
+	{
+		return m_Application->ShowFileDialog(request);
+	}
+
+	bool ApplicationServices::IsFileDialogOpen() const
+	{
+		return m_Application->IsFileDialogOpen();
+	}
+
+	std::optional<FileDialogResult> ApplicationServices::PollFileDialog()
+	{
+		return m_Application->PollFileDialog();
+	}
+
 	Application::Application() = default;
 	Application::~Application() = default;
 
@@ -127,6 +143,7 @@ namespace Engine
 		}
 
 		m_Window->SetEventCallback([this](const InputEvent& event) { OnInputEvent(event); });
+		m_FileDialog = std::make_unique<FileDialog>();
 		if (m_Specification.EnableUI)
 		{
 			m_UILayer = std::make_unique<UILayer>();
@@ -160,7 +177,7 @@ namespace Engine
 
 	void Application::Shutdown()
 	{
-		if (!m_Renderer && !m_UILayer && !m_Window && !m_Platform && !m_Client)
+		if (!m_Renderer && !m_UILayer && !m_FileDialog && !m_Window && !m_Platform && !m_Client)
 		{
 			m_Initialized = false;
 
@@ -181,6 +198,12 @@ namespace Engine
 		{
 			m_UILayer->Shutdown();
 			m_UILayer.reset();
+		}
+
+		if (m_FileDialog)
+		{
+			m_FileDialog->Shutdown();
+			m_FileDialog.reset();
 		}
 
 		if (m_Window)
@@ -256,10 +279,15 @@ namespace Engine
 				m_Renderer->OnFramebufferResized();
 			}
 
-			// 3. Close before starting new GPU work
+			// 3. Close before starting new GPU work, unless the client holds the request back for an unsaved-changes prompt. A held request is cleared so the next close gesture asks again
 			if (m_Window->ShouldClose())
 			{
-				break;
+				if (m_Client->OnCloseRequested())
+				{
+					break;
+				}
+
+				m_Window->CancelClose();
 			}
 
 			// 4. Monotonic time, the simulation step is clamped but the real elapsed time is kept for statistics
@@ -513,6 +541,31 @@ namespace Engine
 		}
 
 		return m_Renderer->GetViewTextureId();
+	}
+
+	bool Application::ShowFileDialog(const FileDialogRequest& request)
+	{
+		if (!m_FileDialog || !m_Window)
+		{
+			return false;
+		}
+
+		return m_FileDialog->Show(request, m_Window->GetNativeWindow());
+	}
+
+	bool Application::IsFileDialogOpen() const
+	{
+		return m_FileDialog != nullptr && m_FileDialog->IsOpen();
+	}
+
+	std::optional<FileDialogResult> Application::PollFileDialog()
+	{
+		if (!m_FileDialog)
+		{
+			return std::nullopt;
+		}
+
+		return m_FileDialog->Poll();
 	}
 
 	const ApplicationSpecification& Application::GetSpecification() const

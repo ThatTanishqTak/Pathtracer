@@ -22,6 +22,7 @@ set(SDL_POWER OFF)
 set(SDL_DIALOG OFF)
 set(SDL_RENDER OFF)
 set(SDL_GPU OFF)
+set(SDL_DIALOG ON)
 
 add_subdirectory(SDL SYSTEM)
 # --------------

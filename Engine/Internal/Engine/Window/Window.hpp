@@ -54,6 +54,9 @@ namespace Engine
 		bool HasFocus() const;
 		void RequestClose();
 
+		// Drops a close request the client held back, the next close gesture sets it again
+		void CancelClose();
+
 		// Relative mouse mode hides the cursor and reports motion as deltas only
 		bool SetRelativeMouseMode(bool enabled);
 		bool IsRelativeMouseMode() const;

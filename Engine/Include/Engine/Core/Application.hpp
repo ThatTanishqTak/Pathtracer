@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace Engine
@@ -21,6 +22,9 @@ namespace Engine
 	};
 
 	class ApplicationClient;
+	class FileDialog;
+	struct FileDialogRequest;
+	struct FileDialogResult;
 	class Platform;
 	class Renderer;
 	class UILayer;
@@ -57,6 +61,10 @@ namespace Engine
 		bool IsUIEnabled() const;
 		uint64_t GetViewTextureId() const;
 
+		bool ShowFileDialog(const FileDialogRequest& request);
+		bool IsFileDialogOpen() const;
+		std::optional<FileDialogResult> PollFileDialog();
+
 		const ApplicationSpecification& GetSpecification() const;
 
 	private:
@@ -67,6 +75,7 @@ namespace Engine
 
 		std::unique_ptr<Platform> m_Platform;
 		std::unique_ptr<Window> m_Window;
+		std::unique_ptr<FileDialog> m_FileDialog;
 		std::unique_ptr<UILayer> m_UILayer;
 		std::unique_ptr<Renderer> m_Renderer;
 		std::unique_ptr<ApplicationClient> m_Client;

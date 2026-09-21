@@ -1,15 +1,36 @@
 #include "Editor/EditorClient.hpp"
 
+#include "Editor/EditorCommands.hpp"
+
 #include <imgui.h>
-#include <imgui_internal.h> // DockBuilder, for the first-run layout only
+#include <imgui_internal.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <format>
+#include <memory>
+#include <optional>
 #include <system_error>
 #include <utility>
 
 namespace Editor
 {
+	namespace
+	{
+		// Created spheres and quads cycle through these so the first few objects tell apart at a glance
+		constexpr std::array<Engine::Math::Vector3, 4> k_Palette
+		{
+			Engine::Math::Vector3(0.8f, 0.3f, 0.25f),
+			Engine::Math::Vector3(0.3f, 0.7f, 0.35f),
+			Engine::Math::Vector3(0.3f, 0.45f, 0.85f),
+			Engine::Math::Vector3(0.85f, 0.75f, 0.3f),
+		};
+
+		constexpr const char* k_SceneFilterName = "Scene files";
+		constexpr const char* k_SceneFilterPattern = "json";
+	}
+
 	EditorClient::EditorClient(EditorOptions options) : m_Options(std::move(options))
 	{
 
@@ -21,7 +42,8 @@ namespace Editor
 
 		PT_APP_INFO("Editor client started, {}x{} window, {}x{} framebuffer, UI {}", m_Services->GetWindowWidth(), m_Services->GetWindowHeight(), m_Services->GetFramebufferWidth(), m_Services->GetFramebufferHeight(), m_Services->IsUIEnabled() ? "enabled" : "disabled");
 		PT_APP_INFO("Viewport: hold the right mouse button over it to look around, W A S D fly, Q and E move down and up, Shift is faster, the keys work while the cursor is over the viewport or it has the focus");
-		PT_APP_INFO("Panels: Scene lists the entities and selects one, Inspector shows the selection, Render Settings edits the mode, bounce limit, render scale, seed and exposure");
+		PT_APP_INFO("Panels: Scene lists the entities, creates, renames, duplicates and deletes them, Inspector edits the selection or the scene settings, Render Settings edits the mode, bounce limit, render scale, seed and exposure");
+		PT_APP_INFO("Keys: Ctrl+Z undo, Ctrl+Y redo, Ctrl+D duplicate, Delete, Ctrl+N new, Ctrl+O open, Ctrl+S save, Ctrl+Shift+S save as");
 
 		if (!m_Services->IsUIEnabled())
 		{
@@ -46,7 +68,14 @@ namespace Editor
 
 		PT_APP_INFO("Asset root: {}", m_AssetRoot.string());
 
-		// A scene from the command line, or an empty scene when there is none or it fails. The Editor builds no demo content, that is what the scene file and Step 11 are for
+		m_RenderSettings.Integrator.SamplesPerFrame = 1;
+		m_RenderSettings.Integrator.MaxBounces = 4;
+		m_RenderSettings.Integrator.Seed = 0;
+
+		// The lens first, loading places the camera at the spawn
+		m_Camera.SetVerticalFieldOfView(k_VerticalFieldOfView);
+
+		// A scene from the command line, or an empty scene when there is none or it fails. The Editor builds no demo content, that is what the scene file and the Create menu are for
 		if (m_Options.ScenePath.empty() || !LoadScene(ResolveScenePath(m_Options.ScenePath)))
 		{
 			if (!m_Options.ScenePath.empty())
@@ -56,14 +85,6 @@ namespace Editor
 
 			BuildEmptyScene();
 		}
-
-		m_RenderSettings.Integrator.SamplesPerFrame = 1;
-		m_RenderSettings.Integrator.MaxBounces = 4;
-		m_RenderSettings.Integrator.Seed = 0;
-
-		// The camera starts where the Sandbox would, reading the spawn once. From here on it is workspace state and the spawn is scene content, neither follows the other
-		m_Camera.SetVerticalFieldOfView(k_VerticalFieldOfView);
-		m_Camera.Reset(m_Scene.GetPlayerSpawn().Position, m_Scene.GetPlayerSpawn().Orientation);
 	}
 
 	void EditorClient::OnStop() noexcept
@@ -96,6 +117,24 @@ namespace Editor
 		}
 	}
 
+	bool EditorClient::OnCloseRequested()
+	{
+		// Nothing to lose, or already answered: the loop may end
+		if (m_ExitConfirmed || !m_History.IsDirty() || m_Services == nullptr || !m_Services->IsUIEnabled())
+		{
+			return true;
+		}
+
+		// The prompt opens in the next BuildUI, a second close gesture while it is up changes nothing
+		if (!m_PromptOpen && m_PendingAction == PendingAction::None)
+		{
+			m_PendingAction = PendingAction::Exit;
+			m_OpenPromptRequested = true;
+		}
+
+		return false;
+	}
+
 	void EditorClient::BuildUI()
 	{
 		ImGuiIO& l_IO = ImGui::GetIO();
@@ -110,6 +149,9 @@ namespace Editor
 		{
 			l_IO.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
 		}
+
+		// The menu bar takes its strip off the work area, the dockspace below fills what is left
+		DrawMainMenuBar();
 
 		// Docking inside the one native window, the panels dock into this space and the swapchain is cleared underneath
 		const ImGuiID l_DockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
@@ -127,11 +169,226 @@ namespace Editor
 
 		// The texture id is the previous frame's, the retired display texture keeps it valid across a resize
 		m_ViewportPanel.Draw(m_Services->GetViewTextureId(), l_Captured);
-		m_SceneHierarchyPanel.Draw(m_Scene, m_SelectedEntity);
-		m_InspectorPanel.Draw(m_Scene, m_SelectedEntity);
+		m_SceneHierarchyPanel.Draw(m_Scene, m_SelectedEntity, *this, m_History.IsDirty(), m_ScenePath, m_FileStatus);
+		m_InspectorPanel.Draw(m_Scene, m_SelectedEntity, m_History, *this);
 
 		const Engine::RenderRequest l_Request = GetRenderRequest();
 		m_RenderSettingsPanel.Draw(m_RenderSettings, l_Request.View.Width, l_Request.View.Height);
+
+		DrawUnsavedChangesPrompt();
+	}
+
+	void EditorClient::DrawMainMenuBar()
+	{
+		// A native dialog or the prompt holds every action, so nothing runs twice or behind the question
+		const bool l_Blocked = m_Services->IsFileDialogOpen() || m_PromptOpen;
+		const bool l_HasSelection = m_Scene.FindEntity(m_SelectedEntity) != nullptr;
+
+		if (!ImGui::BeginMainMenuBar())
+		{
+			return;
+		}
+
+		if (ImGui::BeginMenu("File"))
+		{
+			if (ImGui::MenuItem("New", "Ctrl+N", false, !l_Blocked))
+			{
+				RequestNewScene();
+			}
+
+			if (ImGui::MenuItem("Open...", "Ctrl+O", false, !l_Blocked))
+			{
+				RequestOpenScene();
+			}
+
+			ImGui::Separator();
+
+			if (ImGui::MenuItem("Save", "Ctrl+S", false, !l_Blocked))
+			{
+				SaveScene();
+			}
+
+			if (ImGui::MenuItem("Save As...", "Ctrl+Shift+S", false, !l_Blocked))
+			{
+				ShowSaveAsDialog();
+			}
+
+			ImGui::Separator();
+
+			if (ImGui::MenuItem("Exit", nullptr, false, !l_Blocked))
+			{
+				RequestExit();
+			}
+
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("Edit"))
+		{
+			const std::string l_UndoLabel = m_History.CanUndo() ? std::format("Undo {}", m_History.GetUndoName()) : std::string("Undo");
+			if (ImGui::MenuItem(l_UndoLabel.c_str(), "Ctrl+Z", false, m_History.CanUndo() && !l_Blocked))
+			{
+				Undo();
+			}
+
+			const std::string l_RedoLabel = m_History.CanRedo() ? std::format("Redo {}", m_History.GetRedoName()) : std::string("Redo");
+			if (ImGui::MenuItem(l_RedoLabel.c_str(), "Ctrl+Y", false, m_History.CanRedo() && !l_Blocked))
+			{
+				Redo();
+			}
+
+			ImGui::Separator();
+
+			if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, l_HasSelection && !l_Blocked))
+			{
+				DuplicateEntity(m_SelectedEntity);
+			}
+
+			if (ImGui::MenuItem("Delete", "Del", false, l_HasSelection && !l_Blocked))
+			{
+				DeleteEntity(m_SelectedEntity);
+			}
+
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("Create", !l_Blocked))
+		{
+			DrawCreateMenuItems(*this);
+			ImGui::EndMenu();
+		}
+
+		// The scene and its dirty marker at the right end of the bar
+		const std::string l_Title = std::format("{}{}", m_Scene.GetName(), m_History.IsDirty() ? "*" : "");
+		const float l_TitleWidth = ImGui::CalcTextSize(l_Title.c_str()).x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+		ImGui::SameLine(std::max(ImGui::GetWindowWidth() - l_TitleWidth, ImGui::GetCursorPosX()));
+		ImGui::TextDisabled("%s", l_Title.c_str());
+
+		if (!l_Blocked)
+		{
+			HandleShortcuts();
+		}
+
+		ImGui::EndMainMenuBar();
+	}
+
+	void EditorClient::HandleShortcuts()
+	{
+		// A text field keeps its own keys, and a widget being dragged must finish its one undo step before anything changes the scene under it
+		if (ImGui::GetIO().WantTextInput || ImGui::IsAnyItemActive())
+		{
+			return;
+		}
+
+		constexpr ImGuiInputFlags k_Flags = ImGuiInputFlags_RouteGlobal;
+
+		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, k_Flags))
+		{
+			RequestNewScene();
+		}
+
+		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, k_Flags))
+		{
+			RequestOpenScene();
+		}
+
+		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S, k_Flags))
+		{
+			ShowSaveAsDialog();
+		}
+
+		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, k_Flags))
+		{
+			SaveScene();
+		}
+
+		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, k_Flags | ImGuiInputFlags_Repeat))
+		{
+			Undo();
+		}
+
+		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, k_Flags | ImGuiInputFlags_Repeat) || ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, k_Flags | ImGuiInputFlags_Repeat))
+		{
+			Redo();
+		}
+
+		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D, k_Flags))
+		{
+			DuplicateEntity(m_SelectedEntity);
+		}
+
+		if (ImGui::Shortcut(ImGuiKey_Delete, k_Flags))
+		{
+			DeleteEntity(m_SelectedEntity);
+		}
+	}
+
+	void EditorClient::DrawUnsavedChangesPrompt()
+	{
+		if (m_OpenPromptRequested)
+		{
+			ImGui::OpenPopup("Unsaved changes");
+			m_OpenPromptRequested = false;
+		}
+
+		ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+		m_PromptOpen = false;
+		if (!ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+		{
+			return;
+		}
+
+		m_PromptOpen = true;
+
+		const char* l_Verb = "closing";
+		switch (m_PendingAction)
+		{
+			case PendingAction::NewScene:
+			{
+				l_Verb = "starting a new scene";
+				break;
+			}
+			case PendingAction::OpenScene:
+			{
+				l_Verb = "opening another scene";
+				break;
+			}
+			default:
+			{
+				break;
+			}
+		}
+
+		ImGui::Text("Save the changes to '%s' before %s?", m_Scene.GetName().c_str(), l_Verb);
+		ImGui::Separator();
+
+		if (ImGui::Button("Save"))
+		{
+			ImGui::CloseCurrentPopup();
+
+			// The pending action follows a successful save, which may first need a Save As dialog
+			m_RunPendingAfterSave = true;
+			SaveScene();
+		}
+
+		ImGui::SameLine();
+
+		if (ImGui::Button("Don't save"))
+		{
+			ImGui::CloseCurrentPopup();
+			RunPendingAction();
+		}
+
+		ImGui::SameLine();
+
+		if (ImGui::Button("Cancel"))
+		{
+			ImGui::CloseCurrentPopup();
+			m_PendingAction = PendingAction::None;
+		}
+
+		ImGui::EndPopup();
 	}
 
 	void EditorClient::BuildDefaultLayout(uint32_t dockspaceId)
@@ -161,6 +418,9 @@ namespace Editor
 
 	void EditorClient::Update(const Engine::FrameTime& time, const Engine::InputState& input)
 	{
+		// A finished dialog first, so a loaded scene renders in this frame
+		PollFileDialog();
+
 		const ViewportState& l_Viewport = m_ViewportPanel.GetState();
 
 		// The snapshot says what the frame started with. SetMouseCaptured updates the same state at once, so the look gate is taken before the gesture runs: the press frame's cursor travel is never a turn, and the release frame's relative motion still is
@@ -194,12 +454,347 @@ namespace Editor
 			const Engine::Camera& l_Camera = m_Camera.GetCamera();
 			const Engine::YawPitch& l_Angles = m_Camera.GetAngles();
 
-			PT_APP_TRACE("Frame {}: {} frames in {:.2f}s, {:.2f} ms average, focus {}, capture {}, viewport hovered {} focused {}, camera ({:.2f}, {:.2f}, {:.2f}) yaw {:.1f} pitch {:.1f}, view {}x{} at scale {:.2f}, {} bounces, {} entities, {} materials, scene revision {}, selected {}", time.FrameIndex, m_StatisticsFrames, m_StatisticsElapsed, l_AverageMilliseconds, input.HasFocus, input.MouseCaptured, l_Viewport.Hovered, l_Viewport.Focused, l_Camera.Position.x, l_Camera.Position.y, l_Camera.Position.z, Engine::Math::ToDegrees(l_Angles.Yaw), Engine::Math::ToDegrees(l_Angles.Pitch), l_Request.View.Width, l_Request.View.Height, m_RenderSettings.RenderScale, m_RenderSettings.Integrator.MaxBounces, m_Scene.GetEntities().size(), m_Scene.GetMaterials().size(), m_Scene.GetRadianceRevision(), std::to_underlying(m_SelectedEntity));
+			PT_APP_TRACE("Frame {}: {} frames in {:.2f}s, {:.2f} ms average, focus {}, capture {}, viewport hovered {} focused {}, camera ({:.2f}, {:.2f}, {:.2f}) yaw {:.1f} pitch {:.1f}, view {}x{} at scale {:.2f}, {} bounces, {} entities, {} materials, scene revision {}, selected {}, {} to undo, {} to redo, {}", time.FrameIndex, m_StatisticsFrames, m_StatisticsElapsed, l_AverageMilliseconds, input.HasFocus, input.MouseCaptured, l_Viewport.Hovered, l_Viewport.Focused, l_Camera.Position.x, l_Camera.Position.y, l_Camera.Position.z, Engine::Math::ToDegrees(l_Angles.Yaw), Engine::Math::ToDegrees(l_Angles.Pitch), l_Request.View.Width, l_Request.View.Height, m_RenderSettings.RenderScale, m_RenderSettings.Integrator.MaxBounces, m_Scene.GetEntities().size(), m_Scene.GetMaterials().size(), m_Scene.GetRadianceRevision(), std::to_underlying(m_SelectedEntity), m_History.GetUndoCount(), m_History.GetRedoCount(), m_History.IsDirty() ? "unsaved changes" : "clean");
 
 			m_StatisticsElapsed = 0.0f;
 			m_StatisticsFrames = 0;
 		}
 	}
+
+	void EditorClient::PollFileDialog()
+	{
+		const std::optional<Engine::FileDialogResult> l_Result = m_Services->PollFileDialog();
+		if (!l_Result)
+		{
+			return;
+		}
+
+		if (!l_Result->Error.empty())
+		{
+			Engine::SceneFileResult l_Failure;
+			l_Failure.Error = l_Result->Error;
+			SetFileStatus("The file dialog could not be shown", l_Failure);
+
+			PT_APP_ERROR("File dialog failed: {}", l_Result->Error);
+
+			m_PendingAction = PendingAction::None;
+			m_RunPendingAfterSave = false;
+
+			return;
+		}
+
+		if (!l_Result->Accepted)
+		{
+			PT_APP_TRACE("File dialog cancelled");
+
+			m_PendingAction = PendingAction::None;
+			m_RunPendingAfterSave = false;
+
+			return;
+		}
+
+		if (l_Result->Kind == Engine::FileDialogKind::Open)
+		{
+			LoadScene(l_Result->Path);
+
+			return;
+		}
+
+		const bool l_Saved = SaveSceneTo(NormalizeScenePath(l_Result->Path));
+		if (l_Saved && m_RunPendingAfterSave)
+		{
+			RunPendingAction();
+		}
+		else if (!l_Saved)
+		{
+			m_PendingAction = PendingAction::None;
+		}
+
+		m_RunPendingAfterSave = false;
+	}
+
+	void EditorClient::RequestNewScene()
+	{
+		if (m_History.IsDirty())
+		{
+			m_PendingAction = PendingAction::NewScene;
+			m_OpenPromptRequested = true;
+
+			return;
+		}
+
+		NewScene();
+	}
+
+	void EditorClient::RequestOpenScene()
+	{
+		if (m_History.IsDirty())
+		{
+			m_PendingAction = PendingAction::OpenScene;
+			m_OpenPromptRequested = true;
+
+			return;
+		}
+
+		ShowOpenDialog();
+	}
+
+	void EditorClient::RequestExit()
+	{
+		if (m_History.IsDirty())
+		{
+			m_PendingAction = PendingAction::Exit;
+			m_OpenPromptRequested = true;
+
+			return;
+		}
+
+		m_ExitConfirmed = true;
+		m_Services->RequestClose();
+	}
+
+	void EditorClient::RunPendingAction()
+	{
+		const PendingAction l_Action = m_PendingAction;
+		m_PendingAction = PendingAction::None;
+
+		switch (l_Action)
+		{
+			case PendingAction::NewScene:
+			{
+				NewScene();
+				break;
+			}
+			case PendingAction::OpenScene:
+			{
+				ShowOpenDialog();
+				break;
+			}
+			case PendingAction::Exit:
+			{
+				m_ExitConfirmed = true;
+				m_Services->RequestClose();
+				break;
+			}
+			default:
+			{
+				break;
+			}
+		}
+	}
+
+	void EditorClient::NewScene()
+	{
+		BuildEmptyScene();
+		m_FileStatus = SceneFileStatus{};
+	}
+
+	void EditorClient::ShowOpenDialog()
+	{
+		// Starts in the scene folder when there is one, the asset root otherwise
+		Engine::FileDialogRequest l_Request;
+		l_Request.Kind = Engine::FileDialogKind::Open;
+		l_Request.FilterName = k_SceneFilterName;
+		l_Request.FilterPattern = k_SceneFilterPattern;
+
+		std::error_code l_Error;
+		const std::filesystem::path l_Scenes = m_AssetRoot / "Scenes";
+		l_Request.DefaultLocation = std::filesystem::is_directory(l_Scenes, l_Error) ? l_Scenes : m_AssetRoot;
+
+		if (!m_Services->ShowFileDialog(l_Request))
+		{
+			PT_APP_WARN("Cannot show the open dialog, another dialog is still open");
+			m_PendingAction = PendingAction::None;
+		}
+	}
+
+	void EditorClient::ShowSaveAsDialog()
+	{
+		// Starts at the current file, or at a name from the scene inside the scene folder
+		Engine::FileDialogRequest l_Request;
+		l_Request.Kind = Engine::FileDialogKind::Save;
+		l_Request.FilterName = k_SceneFilterName;
+		l_Request.FilterPattern = k_SceneFilterPattern;
+
+		if (!m_ScenePath.empty())
+		{
+			l_Request.DefaultLocation = m_ScenePath;
+		}
+		else
+		{
+			const std::string l_Name = m_Scene.GetName().empty() ? std::string("Untitled") : m_Scene.GetName();
+			l_Request.DefaultLocation = NormalizeScenePath(m_AssetRoot / "Scenes" / l_Name);
+		}
+
+		if (!m_Services->ShowFileDialog(l_Request))
+		{
+			PT_APP_WARN("Cannot show the save dialog, another dialog is still open");
+			m_PendingAction = PendingAction::None;
+			m_RunPendingAfterSave = false;
+		}
+	}
+
+	void EditorClient::SaveScene()
+	{
+		// No path yet is a Save As, the pending action then waits for the dialog
+		if (m_ScenePath.empty())
+		{
+			ShowSaveAsDialog();
+
+			return;
+		}
+
+		const bool l_Saved = SaveSceneTo(m_ScenePath);
+		if (l_Saved && m_RunPendingAfterSave)
+		{
+			RunPendingAction();
+		}
+		else if (!l_Saved)
+		{
+			// A failed save leaves the prompted action unrun, the status line says why
+			m_PendingAction = PendingAction::None;
+		}
+
+		m_RunPendingAfterSave = false;
+	}
+
+	void EditorClient::Undo()
+	{
+		if (m_History.Undo(m_Scene))
+		{
+			// A restored entity is worth looking at, a removed one leaves nothing selected through the hierarchy's rule
+			PT_APP_INFO("Undo, {} left", m_History.GetUndoCount());
+		}
+	}
+
+	void EditorClient::Redo()
+	{
+		if (m_History.Redo(m_Scene))
+		{
+			PT_APP_INFO("Redo, {} left", m_History.GetRedoCount());
+		}
+	}
+
+	// EditorActions --------------
+
+	void EditorClient::CreateEntity(CreateEntityKind kind)
+	{
+		m_CreatedEntities += 1;
+
+		const Engine::Math::Vector3 l_Position = GetCreatePosition();
+
+		Engine::Entity l_Entity;
+		Engine::Material l_Material;
+
+		switch (kind)
+		{
+			case CreateEntityKind::Sphere:
+			{
+				l_Entity.Name = std::format("Sphere {}", m_CreatedEntities);
+				l_Entity.Geometry.Type = Engine::GeometryType::Sphere;
+				l_Entity.Geometry.Radius = 0.5f;
+				l_Entity.Transform.Translation = l_Position;
+
+				l_Material.BaseColor = k_Palette[m_CreatedEntities % k_Palette.size()];
+				break;
+			}
+			case CreateEntityKind::Quad:
+			{
+				// Lying flat, a quad's normal is object +Z and -90 degrees about X turns it up
+				l_Entity.Name = std::format("Quad {}", m_CreatedEntities);
+				l_Entity.Geometry.Type = Engine::GeometryType::Quad;
+				l_Entity.Geometry.Width = 2.0f;
+				l_Entity.Geometry.Height = 2.0f;
+				l_Entity.Transform.Translation = l_Position;
+				l_Entity.Transform.Rotation = glm::angleAxis(Engine::Math::ToRadians(-90.0f), Engine::Math::k_Right);
+
+				l_Material.BaseColor = k_Palette[m_CreatedEntities % k_Palette.size()];
+				break;
+			}
+			case CreateEntityKind::AreaLight:
+			{
+				// Emissive geometry above the point ahead, facing down: +90 degrees about X turns object +Z into -Y. The radiance lives on the material and nowhere else
+				l_Entity.Name = std::format("Area light {}", m_CreatedEntities);
+				l_Entity.Geometry.Type = Engine::GeometryType::Quad;
+				l_Entity.Geometry.Width = 2.0f;
+				l_Entity.Geometry.Height = 2.0f;
+				l_Entity.Transform.Translation = l_Position + Engine::Math::k_Up * k_AreaLightHeight;
+				l_Entity.Transform.Rotation = glm::angleAxis(Engine::Math::ToRadians(90.0f), Engine::Math::k_Right);
+
+				l_Material.Type = Engine::MaterialType::Emissive;
+				l_Material.BaseColor = Engine::Math::Vector3(0.0f, 0.0f, 0.0f);
+				l_Material.EmissionColor = Engine::Math::Vector3(1.0f, 0.95f, 0.9f);
+				l_Material.EmissionStrength = 8.0f;
+				break;
+			}
+		}
+
+		l_Material.Name = std::format("{} material", l_Entity.Name);
+
+		auto l_Command = std::make_unique<CreateEntityCommand>(std::format("Create '{}'", l_Entity.Name), std::move(l_Entity), std::move(l_Material));
+		const CreateEntityCommand* l_Created = l_Command.get();
+
+		m_History.Execute(std::move(l_Command), m_Scene);
+		m_SelectedEntity = l_Created->GetEntityId();
+	}
+
+	void EditorClient::RenameEntity(Engine::EntityId id, std::string name)
+	{
+		const Engine::Entity* l_Entity = m_Scene.FindEntity(id);
+		if (l_Entity == nullptr || name.empty() || name == l_Entity->Name)
+		{
+			return;
+		}
+
+		Engine::Entity l_After = *l_Entity;
+		l_After.Name = std::move(name);
+
+		m_History.Execute(std::make_unique<EditEntityCommand>(std::format("Rename '{}'", l_Entity->Name), *l_Entity, std::move(l_After)), m_Scene);
+	}
+
+	void EditorClient::DuplicateEntity(Engine::EntityId id)
+	{
+		std::unique_ptr<CreateEntityCommand> l_Command = MakeDuplicateCommand(m_Scene, id);
+		if (!l_Command)
+		{
+			return;
+		}
+
+		const CreateEntityCommand* l_Created = l_Command.get();
+
+		m_History.Execute(std::move(l_Command), m_Scene);
+		m_SelectedEntity = l_Created->GetEntityId();
+	}
+
+	void EditorClient::DeleteEntity(Engine::EntityId id)
+	{
+		if (m_Scene.FindEntity(id) == nullptr)
+		{
+			return;
+		}
+
+		m_History.Execute(std::make_unique<DeleteEntityCommand>(m_Scene, id), m_Scene);
+
+		if (m_SelectedEntity == id)
+		{
+			m_SelectedEntity = Engine::EntityId::Invalid;
+		}
+	}
+
+	void EditorClient::PlaceSpawnAtCamera()
+	{
+		// The controller's orientation is yaw and pitch only, which is what the Sandbox's controller reads back
+		const Engine::Camera& l_Camera = m_Camera.GetCamera();
+
+		const SceneSettings l_Before = GetSceneSettings(m_Scene);
+		SceneSettings l_After = l_Before;
+		l_After.Spawn.Position = l_Camera.Position;
+		l_After.Spawn.Orientation = l_Camera.Orientation;
+
+		m_History.Execute(std::make_unique<EditSceneSettingsCommand>("Place spawn at camera", l_Before, std::move(l_After)), m_Scene);
+	}
+
+	// Files --------------
 
 	std::filesystem::path EditorClient::ResolveScenePath(const std::filesystem::path& path) const
 	{
@@ -211,37 +806,96 @@ namespace Editor
 		return m_AssetRoot / path;
 	}
 
+	std::filesystem::path EditorClient::NormalizeScenePath(std::filesystem::path path) const
+	{
+		// "Room.json" and "Room.scene.json" both stay, "Room" becomes "Room.scene.json"
+		if (path.extension() == ".json")
+		{
+			return path;
+		}
+
+		path += std::string(Engine::SceneSerializer::k_Extension);
+
+		return path;
+	}
+
 	bool EditorClient::LoadScene(const std::filesystem::path& path)
 	{
-		// The serializer already logged every warning and the error with its field context, only the outcome is repeated here
+		// The serializer already logged every warning and the error with its field context, the panel shows them again
 		const Engine::SceneFileResult l_Result = Engine::SceneSerializer::Load(path, m_Scene);
 		if (!l_Result.Succeeded)
 		{
 			PT_APP_ERROR("Scene load failed, the current scene is unchanged: {}", l_Result.Error);
+			SetFileStatus(std::format("Could not open {}", path.string()), l_Result);
 
 			return false;
 		}
 
 		m_ScenePath = path;
 
-		// The Ids in the file replace the ones that were selected, so the selection starts over at the first entity
+		// The Ids in the file replace the ones that were selected, so the selection starts over at the first entity, and nothing from before can be undone into this scene
 		m_SelectedEntity = m_Scene.GetEntities().empty() ? Engine::EntityId::Invalid : m_Scene.GetEntities().front().Id;
+		m_History.Clear();
+		m_CreatedEntities = 0;
+
+		// The camera starts where the Sandbox would, reading the spawn once. From here on it is workspace state and the spawn is scene content, neither follows the other
+		m_Camera.Reset(m_Scene.GetPlayerSpawn().Position, m_Scene.GetPlayerSpawn().Orientation);
+
+		SetFileStatus(std::format("Opened {}", path.string()), l_Result);
 
 		PT_APP_INFO("Loaded scene '{}' from {}: {} entities, {} materials, {} warning(s), revision {}", m_Scene.GetName(), path.string(), m_Scene.GetEntities().size(), m_Scene.GetMaterials().size(), l_Result.Warnings.size(), m_Scene.GetRadianceRevision());
 
 		return true;
 	}
 
+	bool EditorClient::SaveSceneTo(const std::filesystem::path& path)
+	{
+		const Engine::SceneFileResult l_Result = Engine::SceneSerializer::Save(m_Scene, path);
+		if (!l_Result.Succeeded)
+		{
+			PT_APP_ERROR("Scene save failed: {}", l_Result.Error);
+			SetFileStatus(std::format("Could not save {}", path.string()), l_Result);
+
+			return false;
+		}
+
+		m_ScenePath = path;
+		m_History.MarkSaved();
+
+		SetFileStatus(std::format("Saved {}", path.string()), l_Result);
+
+		PT_APP_INFO("Saved scene '{}' to {}", m_Scene.GetName(), path.string());
+
+		return true;
+	}
+
 	void EditorClient::BuildEmptyScene()
 	{
-		// A fresh scene carries a new revision, so the renderer drops whatever it had extracted. The default spawn and environment are the Scene's own
+		// A fresh scene carries a new revision, so the renderer drops whatever it had extracted. The default spawn and environment are the Scene's own, the camera stays where it is
 		m_Scene = Engine::Scene{};
 		m_Scene.SetName("Untitled");
 
 		m_ScenePath.clear();
 		m_SelectedEntity = Engine::EntityId::Invalid;
+		m_History.Clear();
+		m_CreatedEntities = 0;
 
 		PT_APP_INFO("Empty scene '{}' ready, revision {}", m_Scene.GetName(), m_Scene.GetRadianceRevision());
+	}
+
+	void EditorClient::SetFileStatus(std::string summary, const Engine::SceneFileResult& result)
+	{
+		m_FileStatus.Summary = std::move(summary);
+		m_FileStatus.Error = result.Error;
+		m_FileStatus.Warnings = result.Warnings;
+		m_FileStatus.Failed = !result.Succeeded;
+	}
+
+	Engine::Math::Vector3 EditorClient::GetCreatePosition() const
+	{
+		const Engine::Camera& l_Camera = m_Camera.GetCamera();
+
+		return l_Camera.Position + Engine::GetCameraBasis(l_Camera).Forward * k_CreateDistance;
 	}
 
 	Engine::RenderRequest EditorClient::GetRenderRequest() const

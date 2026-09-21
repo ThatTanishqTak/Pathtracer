@@ -6,10 +6,38 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
+#include <string>
 
 namespace Engine
 {
 	class Application;
+
+	enum class FileDialogKind : uint8_t
+	{
+		Open,
+		Save,
+	};
+
+	struct FileDialogRequest
+	{
+		FileDialogKind Kind = FileDialogKind::Open;
+
+		std::string FilterName;
+		std::string FilterPattern;
+
+		std::filesystem::path DefaultLocation;
+	};
+
+	struct FileDialogResult
+	{
+		FileDialogKind Kind = FileDialogKind::Open;
+
+		bool Accepted = false;
+		std::filesystem::path Path;
+
+		std::string Error;
+	};
 
 	class ApplicationServices
 	{
@@ -31,6 +59,10 @@ namespace Engine
 		bool IsUIEnabled() const;
 		uint64_t GetViewTextureId() const;
 
+		bool ShowFileDialog(const FileDialogRequest& request);
+		bool IsFileDialogOpen() const;
+		std::optional<FileDialogResult> PollFileDialog();
+
 	private:
 		Application* m_Application = nullptr;
 	};
@@ -46,5 +78,6 @@ namespace Engine
 		virtual void BuildUI() {}
 		virtual void Update(const FrameTime& time, const InputState& input) = 0;
 		virtual RenderRequest GetRenderRequest() const = 0;
+		virtual bool OnCloseRequested() { return true; }
 	};
 }

@@ -330,6 +330,11 @@ namespace Engine
 		}
 	}
 
+	void Window::CancelClose()
+	{
+		m_ShouldClose = false;
+	}
+
 	bool Window::SetRelativeMouseMode(bool enabled)
 	{
 		if (!m_NativeWindowHandle)
