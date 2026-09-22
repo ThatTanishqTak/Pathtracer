@@ -23,8 +23,8 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Include" PREFIX "Include" FILES $
 # Include directory
 target_include_directories(${TARGET_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Include")
 
-# Linking executable against the engine, and against Dear ImGui directly because the panels call it
-target_link_libraries(${TARGET_NAME} PRIVATE Engine imgui)
+# Linking executable against the engine, and against Dear ImGui and ImGuizmo
+target_link_libraries(${TARGET_NAME} PRIVATE Engine imgui imguizmo)
 
 # Warnings
 target_compile_options(${TARGET_NAME} PRIVATE

@@ -42,6 +42,7 @@ namespace Editor
 
 		PT_APP_INFO("Editor client started, {}x{} window, {}x{} framebuffer, UI {}", m_Services->GetWindowWidth(), m_Services->GetWindowHeight(), m_Services->GetFramebufferWidth(), m_Services->GetFramebufferHeight(), m_Services->IsUIEnabled() ? "enabled" : "disabled");
 		PT_APP_INFO("Viewport: hold the right mouse button over it to look around, W A S D fly, Q and E move down and up, Shift is faster, the keys work while the cursor is over the viewport or it has the focus");
+		PT_APP_INFO("Viewport: left click selects what is under the cursor and the background clears the selection, 1 2 3 switch the gizmo to translate, rotate and scale, 4 hides it, Ctrl snaps while dragging a handle");
 		PT_APP_INFO("Panels: Scene lists the entities, creates, renames, duplicates and deletes them, Inspector edits the selection or the scene settings, Render Settings edits the mode, bounce limit, render scale, seed and exposure");
 		PT_APP_INFO("Keys: Ctrl+Z undo, Ctrl+Y redo, Ctrl+D duplicate, Delete, Ctrl+N new, Ctrl+O open, Ctrl+S save, Ctrl+Shift+S save as");
 
@@ -167,8 +168,8 @@ namespace Editor
 			}
 		}
 
-		// The texture id is the previous frame's, the retired display texture keeps it valid across a resize
-		m_ViewportPanel.Draw(m_Services->GetViewTextureId(), l_Captured);
+		// The texture id is the previous frame's, the retired display texture keeps it valid across a resize. The gizmo edits the selection live and records its command through the history, like an Inspector drag
+		m_ViewportPanel.Draw(m_Services->GetViewTextureId(), l_Captured, m_Camera.GetCamera(), m_Scene, m_SelectedEntity, m_History);
 		m_SceneHierarchyPanel.Draw(m_Scene, m_SelectedEntity, *this, m_History.IsDirty(), m_ScenePath, m_FileStatus);
 		m_InspectorPanel.Draw(m_Scene, m_SelectedEntity, m_History, *this);
 
@@ -274,8 +275,8 @@ namespace Editor
 
 	void EditorClient::HandleShortcuts()
 	{
-		// A text field keeps its own keys, and a widget being dragged must finish its one undo step before anything changes the scene under it
-		if (ImGui::GetIO().WantTextInput || ImGui::IsAnyItemActive())
+		// A text field keeps its own keys, and a widget or a gizmo handle being dragged must finish its one undo step before anything changes the scene under it
+		if (ImGui::GetIO().WantTextInput || ImGui::IsAnyItemActive() || m_ViewportPanel.GetState().GizmoActive)
 		{
 			return;
 		}
@@ -441,6 +442,39 @@ namespace Editor
 
 		// Look while captured, fly while the viewport owns the keyboard as BuildUI decided. Panel interaction reaches neither
 		m_Camera.Update(time, input, l_CapturedAtStart, l_Viewport.KeyboardOwned);
+
+		// The press that starts the look gesture is never a pick, and the frozen cursor of a captured frame points at nothing
+		if (!l_CapturedAtStart)
+		{
+			if (l_Viewport.PickReady && input.WasMouseButtonPressed(Engine::MouseButton::Left))
+			{
+				PickEntity(input.MouseX, input.MouseY);
+			}
+
+			// The gizmo keys take the camera's route: the viewport's keys while it owns the keyboard, which a drag in it never does
+			if (l_Viewport.KeyboardOwned && !l_Viewport.GizmoActive)
+			{
+				if (input.WasKeyPressed(Engine::Key::Number1))
+				{
+					m_ViewportPanel.SetGizmoOperation(GizmoOperation::Translate);
+				}
+
+				if (input.WasKeyPressed(Engine::Key::Number2))
+				{
+					m_ViewportPanel.SetGizmoOperation(GizmoOperation::Rotate);
+				}
+
+				if (input.WasKeyPressed(Engine::Key::Number3))
+				{
+					m_ViewportPanel.SetGizmoOperation(GizmoOperation::Scale);
+				}
+
+				if (input.WasKeyPressed(Engine::Key::Number4))
+				{
+					m_ViewportPanel.SetGizmoOperation(GizmoOperation::None);
+				}
+			}
+		}
 
 		m_StatisticsElapsed += time.ElapsedSeconds;
 		m_StatisticsFrames += 1;
@@ -672,6 +706,35 @@ namespace Editor
 		if (m_History.Redo(m_Scene))
 		{
 			PT_APP_INFO("Redo, {} left", m_History.GetRedoCount());
+		}
+	}
+
+	void EditorClient::PickEntity(float mouseX, float mouseY)
+	{
+		const ViewportState& l_Viewport = m_ViewportPanel.GetState();
+		if (l_Viewport.ImageWidth <= 0.0f || l_Viewport.ImageHeight <= 0.0f || l_Viewport.ContentWidth == 0 || l_Viewport.ContentHeight == 0)
+		{
+			return;
+		}
+
+		// Window coordinates to the view's own pixels, so the ray comes from the same camera and extent the image was rendered with. Unjittered, the CPU twin of the shader's ray, so the pick does not move with the seed
+		const Engine::Camera l_Camera = m_ViewportPanel.GetViewCamera(m_Camera.GetCamera());
+		const float l_PixelX = (mouseX - l_Viewport.ImageX) * static_cast<float>(l_Viewport.ContentWidth) / l_Viewport.ImageWidth;
+		const float l_PixelY = (mouseY - l_Viewport.ImageY) * static_cast<float>(l_Viewport.ContentHeight) / l_Viewport.ImageHeight;
+
+		const Engine::Ray l_Ray = Engine::GenerateCameraRay(l_Camera, l_PixelX, l_PixelY);
+		const Engine::ScenePick l_Pick = Engine::PickClosest(m_Scene, l_Ray);
+
+		// Selection is workspace state: not a command, nothing is dirtied, and the background clears it
+		m_SelectedEntity = l_Pick.Entity;
+
+		if (const Engine::Entity* l_Entity = m_Scene.FindEntity(l_Pick.Entity); l_Entity != nullptr)
+		{
+			PT_APP_TRACE("Picked '{}' ({}) at {:.2f} m through pixel ({:.0f}, {:.0f})", l_Entity->Name, std::to_underlying(l_Entity->Id), l_Pick.Distance, l_PixelX, l_PixelY);
+		}
+		else
+		{
+			PT_APP_TRACE("Picked nothing through pixel ({:.0f}, {:.0f}), selection cleared", l_PixelX, l_PixelY);
 		}
 	}
 

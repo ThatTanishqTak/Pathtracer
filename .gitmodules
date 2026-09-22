@@ -19,3 +19,6 @@
 [submodule "Vendor/imgui"]
 	path = Vendor/imgui
 	url = https://github.com/ThatTanishqTak/imgui.git
+[submodule "Vendor/ImGuizmo"]
+	path = Vendor/ImGuizmo
+	url = https://github.com/ThatTanishqTak/ImGuizmo.git

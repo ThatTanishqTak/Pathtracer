@@ -72,6 +72,7 @@ namespace Editor
 		void Undo();
 		void Redo();
 
+		void PickEntity(float mouseX, float mouseY);
 		void SetFileStatus(std::string summary, const Engine::SceneFileResult& result);
 
 		Engine::Math::Vector3 GetCreatePosition() const;

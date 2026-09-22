@@ -19,7 +19,6 @@ set(SDL_HIDAPI OFF)
 set(SDL_SENSOR OFF)
 set(SDL_CAMERA OFF)
 set(SDL_POWER OFF)
-set(SDL_DIALOG OFF)
 set(SDL_RENDER OFF)
 set(SDL_GPU OFF)
 set(SDL_DIALOG ON)
@@ -104,4 +103,14 @@ target_compile_definitions(imgui PUBLIC IMGUI_IMPL_VULKAN_USE_VOLK IMGUI_DISABLE
 target_link_libraries(imgui PUBLIC SDL3::SDL3 volk::volk)
 
 add_library(imgui::imgui ALIAS imgui)
+# --------------
+
+# ImGuizmo --------------
+set(IMGUIZMO_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/ImGuizmo")
+add_library(imguizmo STATIC "${IMGUIZMO_DIRECTORY}/src/ImGuizmo.cpp")
+
+target_include_directories(imguizmo SYSTEM PUBLIC "${IMGUIZMO_DIRECTORY}/src")
+target_link_libraries(imguizmo PUBLIC imgui)
+
+add_library(imguizmo::imguizmo ALIAS imguizmo)
 # --------------

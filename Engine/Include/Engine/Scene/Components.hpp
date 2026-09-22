@@ -47,4 +47,28 @@ namespace Engine
 	{
 		return glm::translate(Math::Matrix4(1.0f), transform.Translation) * glm::mat4_cast(GetSafeRotation(transform)) * glm::scale(Math::Matrix4(1.0f), transform.Scale);
 	}
+
+	// The object-space scale that turns the unit shape into the geometry: a sphere's radius on every axis, a quad's width and height in its plane. The renderer and picking both fold it behind the transform so they intersect the same unit shapes. False for None or a non-finite parameter
+	inline bool GetGeometryScale(const GeometryComponent& geometry, Math::Vector3& scale)
+	{
+		switch (geometry.Type)
+		{
+			case GeometryType::Sphere:
+			{
+				scale = Math::Vector3(geometry.Radius);
+
+				return std::isfinite(geometry.Radius);
+			}
+			case GeometryType::Quad:
+			{
+				scale = Math::Vector3(geometry.Width, geometry.Height, 1.0f);
+
+				return std::isfinite(geometry.Width) && std::isfinite(geometry.Height);
+			}
+			default:
+			{
+				return false;
+			}
+		}
+	}
 }

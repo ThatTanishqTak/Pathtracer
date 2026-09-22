@@ -59,30 +59,17 @@ namespace Engine
 			};
 		}
 
-		// Folds the geometry parameters into the object-space scale so the shader always intersects a unit shape
-		bool GetGeometryScale(const Entity& entity, Math::Vector3& scale, RenderPrimitiveType& type)
+		// The shared geometry scale folds the parameters into the object-space scale so the shader always intersects a unit shape, the record type is the renderer's own
+		bool GetPrimitiveScale(const Entity& entity, Math::Vector3& scale, RenderPrimitiveType& type)
 		{
-			switch (entity.Geometry.Type)
+			if (!GetGeometryScale(entity.Geometry, scale))
 			{
-				case GeometryType::Sphere:
-				{
-					type = RenderPrimitiveType::Sphere;
-					scale = Math::Vector3(entity.Geometry.Radius);
-
-					return std::isfinite(entity.Geometry.Radius);
-				}
-				case GeometryType::Quad:
-				{
-					type = RenderPrimitiveType::Quad;
-					scale = Math::Vector3(entity.Geometry.Width, entity.Geometry.Height, 1.0f);
-
-					return std::isfinite(entity.Geometry.Width) && std::isfinite(entity.Geometry.Height);
-				}
-				default:
-				{
-					return false;
-				}
+				return false;
 			}
+
+			type = entity.Geometry.Type == GeometryType::Quad ? RenderPrimitiveType::Quad : RenderPrimitiveType::Sphere;
+
+			return true;
 		}
 	}
 
@@ -111,7 +98,7 @@ namespace Engine
 
 			Math::Vector3 l_GeometryScale{};
 			RenderPrimitiveType l_Type = RenderPrimitiveType::Sphere;
-			if (!GetGeometryScale(l_Entity, l_GeometryScale, l_Type))
+			if (!GetPrimitiveScale(l_Entity, l_GeometryScale, l_Type))
 			{
 				PT_CORE_WARN("Entity '{}' ({}) has non-finite geometry parameters and is not rendered", l_Entity.Name, std::to_underlying(l_Entity.Id));
 				l_Skipped += 1;

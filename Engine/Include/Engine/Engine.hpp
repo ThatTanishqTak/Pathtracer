@@ -13,4 +13,5 @@
 #include "Engine/Scene/Entity.hpp"
 #include "Engine/Scene/Material.hpp"
 #include "Engine/Scene/Scene.hpp"
+#include "Engine/Scene/ScenePicking.hpp"
 #include "Engine/Scene/SceneSerializer.hpp"

@@ -300,7 +300,8 @@ namespace Engine
 			VkPhysicalDeviceProperties l_Properties{};
 			vkGetPhysicalDeviceProperties(l_Device, &l_Properties);
 
-			PT_CORE_TRACE("-------{}", l_Properties.deviceName);
+			// Enough to tell a driver problem from a hardware limit without vulkaninfo: the type says whether the discrete GPU is even listed, the version is the first gate below
+			PT_CORE_TRACE("-------{} ({}, Vulkan {}.{}.{}, driver {}.{}.{})", l_Properties.deviceName, DeviceTypeToString(l_Properties.deviceType), VK_API_VERSION_MAJOR(l_Properties.apiVersion), VK_API_VERSION_MINOR(l_Properties.apiVersion), VK_API_VERSION_PATCH(l_Properties.apiVersion), VK_API_VERSION_MAJOR(l_Properties.driverVersion), VK_API_VERSION_MINOR(l_Properties.driverVersion), VK_API_VERSION_PATCH(l_Properties.driverVersion));
 
 			uint32_t l_GraphicsQueueFamilyIndex = UINT32_MAX;
 			if (!IsDeviceSuitable(l_Device, l_Properties, surface, l_GraphicsQueueFamilyIndex))
@@ -435,7 +436,36 @@ namespace Engine
 
 	bool VulkanDevice::IsDeviceSuitable(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties, VkSurfaceKHR surface, uint32_t& graphicsQueueFamilyIndex)
 	{
-		if (properties.apiVersion < VK_API_VERSION_1_4 || !FindGraphicsQueueFamily(device, surface, graphicsQueueFamilyIndex) || !IsDeviceExtensionSupported(device, VK_KHR_SWAPCHAIN_EXTENSION_NAME) || !HasSurfaceFormatsAndPresentModes(device, surface) || !SupportsRequiredFeatures(device))
+		// Each gate names itself when it rejects, so a log from another machine says why a device was skipped. The feature gate reports the missing feature by name itself
+		if (properties.apiVersion < VK_API_VERSION_1_4)
+		{
+			PT_CORE_TRACE("Skipped: the device supports Vulkan {}.{}, 1.4 is required", VK_API_VERSION_MAJOR(properties.apiVersion), VK_API_VERSION_MINOR(properties.apiVersion));
+
+			return false;
+		}
+
+		if (!FindGraphicsQueueFamily(device, surface, graphicsQueueFamilyIndex))
+		{
+			PT_CORE_TRACE("Skipped: no queue family offers graphics, compute and presentation to the window together");
+
+			return false;
+		}
+
+		if (!IsDeviceExtensionSupported(device, VK_KHR_SWAPCHAIN_EXTENSION_NAME))
+		{
+			PT_CORE_TRACE("Skipped: {} is not supported", VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+
+			return false;
+		}
+
+		if (!HasSurfaceFormatsAndPresentModes(device, surface))
+		{
+			PT_CORE_TRACE("Skipped: the device reports no surface formats or present modes for the window");
+
+			return false;
+		}
+
+		if (!SupportsRequiredFeatures(device))
 		{
 			return false;
 		}
