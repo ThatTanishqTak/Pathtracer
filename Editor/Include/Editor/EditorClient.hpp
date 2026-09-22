@@ -93,6 +93,7 @@ namespace Editor
 		static constexpr float k_AreaLightHeight = 2.0f;
 
 		Engine::Scene m_Scene;
+		Engine::AssetManager m_Assets; // The meshes the scene references, process-wide: a new or opened scene never clears it
 		Engine::EntityId m_SelectedEntity = Engine::EntityId::Invalid;
 
 		EditorCommandHistory m_History;

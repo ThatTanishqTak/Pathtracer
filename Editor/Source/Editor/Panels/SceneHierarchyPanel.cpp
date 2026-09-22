@@ -23,6 +23,16 @@ namespace Editor
 			actions.CreateEntity(CreateEntityKind::Quad);
 		}
 
+		if (ImGui::MenuItem("Cube"))
+		{
+			actions.CreateEntity(CreateEntityKind::Cube);
+		}
+
+		if (ImGui::MenuItem("Icosphere"))
+		{
+			actions.CreateEntity(CreateEntityKind::Icosphere);
+		}
+
 		if (ImGui::MenuItem("Area light"))
 		{
 			actions.CreateEntity(CreateEntityKind::AreaLight);

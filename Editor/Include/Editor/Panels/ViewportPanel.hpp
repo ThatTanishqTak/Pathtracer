@@ -44,7 +44,7 @@ namespace Editor
 	{
 	public:
 		// Called from BuildUI, so the texture id is the previous frame's and the size it measures reaches this frame's render request. The gizmo edits the selected entity live and records the command when the drag ends
-		void Draw(uint64_t textureId, bool mouseCaptured, const Engine::Camera& camera, Engine::Scene& scene, Engine::EntityId selectedEntity, EditorCommandHistory& history);
+		void Draw(uint64_t textureId, bool mouseCaptured, const Engine::Camera& camera, Engine::Scene& scene, const Engine::AssetManager& assets, Engine::EntityId selectedEntity, EditorCommandHistory& history);
 
 		const ViewportState& GetState() const { return m_State; }
 
@@ -61,7 +61,7 @@ namespace Editor
 		void DrawToolbar();
 
 		// Both read the image rectangle from the state, which Draw fills before calling them
-		void DrawSelectionOutline(const Engine::Camera& camera, const Engine::Entity& entity) const;
+		void DrawSelectionOutline(const Engine::Camera& camera, const Engine::AssetManager& assets, const Engine::Entity& entity) const; // A mesh outlines as its object-space bounds, read from the assets
 		bool DrawGizmo(const Engine::Camera& camera, Engine::Scene& scene, Engine::Entity& entity, EditorCommandHistory& history); // Whether the gizmo is under the cursor or being dragged, a press there is never a pick
 
 		void EndGizmoEdit(Engine::Scene& scene, EditorCommandHistory& history);

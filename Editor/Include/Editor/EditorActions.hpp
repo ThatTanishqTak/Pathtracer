@@ -11,6 +11,8 @@ namespace Editor
 	{
 		Sphere,
 		Quad,
+		Cube, // The built-in cube mesh
+		Icosphere, // The built-in icosphere mesh
 		AreaLight,
 	};
 

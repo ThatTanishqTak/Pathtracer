@@ -37,6 +37,13 @@ StructuredBuffer<PrimitiveRecord> u_Primitives;
 [[vk::binding(2, 0)]]
 StructuredBuffer<MaterialRecord> u_Materials;
 
+// Bindings 3 and 4: the vertices and triangles of every mesh the records reference, read through each mesh record's triangle range
+[[vk::binding(3, 0)]]
+StructuredBuffer<VertexRecord> u_Vertices;
+
+[[vk::binding(4, 0)]]
+StructuredBuffer<TriangleRecord> u_Triangles;
+
 // One small block per dispatch, pushed straight into the command buffer
 [[vk::push_constant]]
 ConstantBuffer<DiagnosticParameters> u_Parameters;
@@ -73,8 +80,8 @@ void computeMain(uint3 threadId : SV_DispatchThreadID)
 		l_Color = l_Ray.Direction * 0.5 + 0.5;
 	}
 	else if (l_Mode == k_ModeHit || l_Mode == k_ModeNormal || l_Mode == k_ModeDistance || l_Mode == k_ModeBaseColor)
-	{
-		const Hit l_Hit = TraceClosest(l_Ray, u_Primitives, u_Parameters.PrimitiveCount, 0.0, k_MaxRayDistance);
+    {
+        const Hit l_Hit = TraceClosest(l_Ray, u_Primitives, u_Parameters.PrimitiveCount, u_Vertices, u_Triangles, 0.0, k_MaxRayDistance);
 		if (l_Hit.Distance < 0.0)
 		{
 			l_Color = l_Mode == k_ModeHit ? MissColor(l_Ray.Direction) : float3(0.0, 0.0, 0.0);

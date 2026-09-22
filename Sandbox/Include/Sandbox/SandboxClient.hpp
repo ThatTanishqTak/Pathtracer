@@ -31,6 +31,7 @@ namespace Sandbox
 
 		void BuildDemoScene();
 		void CreateSphere();
+		void CreateMesh();
 		void DestroySelected();
 		void SelectNext();
 		void MoveSelected(const Engine::Math::Vector3& delta);
@@ -55,7 +56,8 @@ namespace Sandbox
 		// Scene editing keys, enough to exercise create, move, recolour and delete against the uploaded records
 		static constexpr float k_MoveStep = 0.25f; // Metres per key press
 		static constexpr float k_CreatedSphereRadius = 0.4f;
-		static constexpr float k_CreatedSphereRing = 2.5f; // Distance from the origin new spheres appear at
+		static constexpr float k_CreatedSphereRing = 2.5f; // Distance from the origin new spheres and meshes appear at
+		static constexpr float k_CreatedMeshSize = 0.8f; // The transform scale of a created cube or icosphere, both fit the unit cube
 
 		// The view renders at the framebuffer size times this scale, so the render extent can differ from the window
 		static constexpr uint32_t k_RenderScaleCount = 3;
@@ -65,10 +67,12 @@ namespace Sandbox
 		static constexpr uint32_t k_BounceLimitCount = 5;
 		static constexpr uint32_t k_BounceLimits[k_BounceLimitCount] = { 0, 1, 2, 4, 8 };
 
-		// The client owns the scene, the renderer only sees it through the render request
+		// The client owns the scene and the mesh assets it references, the renderer only sees them through the render request
 		Engine::Scene m_Scene;
+		Engine::AssetManager m_Assets;
 		Engine::EntityId m_SelectedEntity = Engine::EntityId::Invalid;
 		uint32_t m_CreatedSpheres = 0;
+		uint32_t m_CreatedMeshes = 0;
 		uint32_t m_PaletteIndex = 0;
 
 		// Provisional first-person navigation, starts at the scene's player spawn

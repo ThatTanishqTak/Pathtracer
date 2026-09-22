@@ -1,6 +1,7 @@
 #include "Sandbox/SandboxClient.hpp"
 
 #include "Sandbox/CameraChecks.hpp"
+#include "Sandbox/MeshChecks.hpp"
 
 #include <algorithm>
 #include <array>
@@ -72,12 +73,17 @@ namespace Sandbox
 		PT_APP_INFO("Sandbox client started, {}x{} window, {}x{} framebuffer", m_Services->GetWindowWidth(), m_Services->GetWindowHeight(), m_Services->GetFramebufferWidth(), m_Services->GetFramebufferHeight());
 		PT_APP_INFO("Controls: click captures the mouse and looks around, W A S D walk, Shift runs, Escape releases the mouse and closes when it is already released, standing still lets the image converge");
 		PT_APP_INFO("Render: 1-5 select a diagnostic view, 6 the path tracer, B cycles the bounce limit, R cycles the render scale, Equals and Minus step exposure");
-		PT_APP_INFO("Scene: N creates a sphere, Backspace deletes the selected entity, Period selects the next entity, arrows move the selection on X and Z, PageUp and PageDown on Y, C recolours its material");
+		PT_APP_INFO("Scene: N creates a sphere, M a cube or an icosphere in turn, Backspace deletes the selected entity, Period selects the next entity, arrows move the selection on X and Z, PageUp and PageDown on Y, C recolours its material");
 		PT_APP_INFO("File: F5 saves the scene to its file, F9 reloads it and returns the player to the spawn");
 
 		if (!RunCameraChecks())
 		{
 			PT_APP_WARN("Camera checks failed, the diagnostic modes may not match the CPU camera");
+		}
+
+		if (!RunMeshChecks())
+		{
+			PT_APP_WARN("Mesh checks failed, the built-in meshes or the triangle intersection may not match the shader");
 		}
 
 		// Content is anchored at the executable, not at wherever the process was started from, so a shortcut or a debugger with another working directory finds the same files
@@ -97,6 +103,11 @@ namespace Sandbox
 		}
 
 		PT_APP_INFO("Asset root: {}", m_AssetRoot.string());
+
+		// The built-in meshes are loaded up front, the demo scene and the M key find them by source
+		m_Assets.SetAssetRoot(m_AssetRoot);
+		m_Assets.LoadMesh(Engine::AssetManager::k_CubeSource);
+		m_Assets.LoadMesh(Engine::AssetManager::k_IcosphereSource);
 
 		// A scene from the command line, or the demo scene when there is none or it fails. A failed file is not remembered, so F5 cannot overwrite it with the demo scene
 		if (m_Options.ScenePath.empty() || !LoadScene(ResolveScenePath(m_Options.ScenePath)))
@@ -233,6 +244,11 @@ namespace Sandbox
 			CreateSphere();
 		}
 
+		if (input.WasKeyPressed(Engine::Key::M))
+		{
+			CreateMesh();
+		}
+
 		if (input.WasKeyPressed(Engine::Key::Backspace))
 		{
 			DestroySelected();
@@ -301,7 +317,7 @@ namespace Sandbox
 	bool SandboxClient::LoadScene(const std::filesystem::path& path)
 	{
 		// The serializer already logged every warning and the error with its field context, only the outcome is repeated here
-		const Engine::SceneFileResult l_Result = Engine::SceneSerializer::Load(path, m_Scene);
+		const Engine::SceneFileResult l_Result = Engine::SceneSerializer::Load(path, m_Scene, m_Assets);
 		if (!l_Result.Succeeded)
 		{
 			PT_APP_ERROR("Scene load failed, the current scene is unchanged: {}", l_Result.Error);
@@ -323,7 +339,7 @@ namespace Sandbox
 	{
 		const std::filesystem::path l_Path = m_ScenePath.empty() ? ResolveScenePath(k_DefaultScenePath) : m_ScenePath;
 
-		const Engine::SceneFileResult l_Result = Engine::SceneSerializer::Save(m_Scene, l_Path);
+		const Engine::SceneFileResult l_Result = Engine::SceneSerializer::Save(m_Scene, l_Path, m_Assets);
 		if (!l_Result.Succeeded)
 		{
 			PT_APP_ERROR("Scene save failed, the file on disk is unchanged: {}", l_Result.Error);
@@ -364,6 +380,20 @@ namespace Sandbox
 			l_GreenMaterial = l_Material.Id;
 		}
 
+		Engine::MaterialId l_BlueMaterial;
+		{
+			Engine::Material& l_Material = m_Scene.CreateMaterial("Blue");
+			l_Material.BaseColor = k_Palette[2];
+			l_BlueMaterial = l_Material.Id;
+		}
+
+		Engine::MaterialId l_YellowMaterial;
+		{
+			Engine::Material& l_Material = m_Scene.CreateMaterial("Yellow");
+			l_Material.BaseColor = k_Palette[3];
+			l_YellowMaterial = l_Material.Id;
+		}
+
 		// The area light: emissive geometry, the emitted radiance lives on the material and nowhere else
 		Engine::MaterialId l_LightMaterial;
 		{
@@ -402,6 +432,37 @@ namespace Sandbox
 			l_Entity.Geometry.Radius = 0.5f;
 			l_Entity.Transform.Translation = Engine::Math::Vector3(-2.0f, -0.5f, 0.0f);
 			l_Entity.Transform.Scale = Engine::Math::Vector3(1.0f, 0.6f, 1.0f);
+			l_Entity.Material = l_GreenMaterial;
+		}
+
+		// Two entities share the cube mesh with their own transforms and materials, which is the sharing Step 13 is about. The first is turned so three faces show, the second is stretched so the normal transform under non-uniform scale is exercised on triangles too. Both stand on the floor at y = -1
+		const Engine::MeshId l_CubeMesh = m_Assets.LoadMesh(Engine::AssetManager::k_CubeSource);
+		{
+			Engine::Entity& l_Entity = m_Scene.CreateEntity("Cube");
+			l_Entity.Geometry.Type = Engine::GeometryType::Mesh;
+			l_Entity.Geometry.Mesh = l_CubeMesh;
+			l_Entity.Transform.Translation = Engine::Math::Vector3(2.0f, -0.5f, 0.0f);
+			l_Entity.Transform.Rotation = glm::angleAxis(Engine::Math::ToRadians(30.0f), Engine::Math::k_Up);
+			l_Entity.Material = l_BlueMaterial;
+		}
+
+		{
+			Engine::Entity& l_Entity = m_Scene.CreateEntity("Tall cube");
+			l_Entity.Geometry.Type = Engine::GeometryType::Mesh;
+			l_Entity.Geometry.Mesh = l_CubeMesh;
+			l_Entity.Transform.Translation = Engine::Math::Vector3(2.5f, 0.0f, -2.5f);
+			l_Entity.Transform.Rotation = glm::angleAxis(Engine::Math::ToRadians(45.0f), Engine::Math::k_Up);
+			l_Entity.Transform.Scale = Engine::Math::Vector3(0.5f, 2.0f, 0.5f);
+			l_Entity.Material = l_YellowMaterial;
+		}
+
+		// The smooth-shaded mesh next to the analytic spheres, so the normal view shows the interpolated normals against the exact ones
+		{
+			Engine::Entity& l_Entity = m_Scene.CreateEntity("Icosphere");
+			l_Entity.Geometry.Type = Engine::GeometryType::Mesh;
+			l_Entity.Geometry.Mesh = m_Assets.LoadMesh(Engine::AssetManager::k_IcosphereSource);
+			l_Entity.Transform.Translation = Engine::Math::Vector3(-1.0f, -0.25f, -2.5f);
+			l_Entity.Transform.Scale = Engine::Math::Vector3(1.5f, 1.5f, 1.5f);
 			l_Entity.Material = l_GreenMaterial;
 		}
 
@@ -446,6 +507,46 @@ namespace Sandbox
 		l_Entity.Geometry.Type = Engine::GeometryType::Sphere;
 		l_Entity.Geometry.Radius = k_CreatedSphereRadius;
 		l_Entity.Transform.Translation = Engine::Math::Vector3(k_CreatedSphereRing * std::cos(l_Angle), -1.0f + k_CreatedSphereRadius, k_CreatedSphereRing * std::sin(l_Angle));
+		l_Entity.Material = l_MaterialId;
+
+		m_SelectedEntity = l_Entity.Id;
+
+		// The creates advanced the revision, the edits through the references did not
+		m_Scene.MarkRadianceChanged();
+
+		PT_APP_INFO("Created '{}' ({}) at ({:.2f}, {:.2f}, {:.2f}), now selected", l_Entity.Name, std::to_underlying(l_Entity.Id), l_Entity.Transform.Translation.x, l_Entity.Transform.Translation.y, l_Entity.Transform.Translation.z);
+	}
+
+	void SandboxClient::CreateMesh()
+	{
+		m_CreatedMeshes += 1;
+
+		// Cubes and icospheres in turn, every one sharing the built-in mesh of its kind with its own material, like the created spheres
+		const bool l_Cube = m_CreatedMeshes % 2 == 1;
+		const Engine::MeshId l_Mesh = m_Assets.LoadMesh(l_Cube ? Engine::AssetManager::k_CubeSource : Engine::AssetManager::k_IcosphereSource);
+		if (l_Mesh == Engine::MeshId::Invalid)
+		{
+			PT_APP_WARN("The built-in mesh could not be loaded, nothing was created");
+
+			return;
+		}
+
+		Engine::MaterialId l_MaterialId;
+		{
+			Engine::Material& l_Material = m_Scene.CreateMaterial(std::format("Mesh {} material", m_CreatedMeshes));
+			l_Material.BaseColor = k_Palette[(m_CreatedMeshes + 3) % k_Palette.size()];
+			l_MaterialId = l_Material.Id;
+		}
+
+		// The same ring as the spheres, offset half a step so the two kinds interleave, standing on the floor
+		const float l_Angle = static_cast<float>(m_CreatedMeshes) * 0.9f + 0.45f;
+
+		Engine::Entity& l_Entity = m_Scene.CreateEntity(std::format("{} {}", l_Cube ? "Cube" : "Icosphere", m_CreatedMeshes));
+		l_Entity.Geometry.Type = Engine::GeometryType::Mesh;
+		l_Entity.Geometry.Mesh = l_Mesh;
+		l_Entity.Transform.Translation = Engine::Math::Vector3(k_CreatedSphereRing * std::cos(l_Angle), -1.0f + k_CreatedMeshSize * 0.5f, k_CreatedSphereRing * std::sin(l_Angle));
+		l_Entity.Transform.Rotation = glm::angleAxis(l_Angle, Engine::Math::k_Up);
+		l_Entity.Transform.Scale = Engine::Math::Vector3(k_CreatedMeshSize);
 		l_Entity.Material = l_MaterialId;
 
 		m_SelectedEntity = l_Entity.Id;
@@ -564,6 +665,7 @@ namespace Sandbox
 		l_Request.View.Settings = m_Settings;
 		l_Request.View.Mode = m_Mode;
 		l_Request.ActiveScene = &m_Scene;
+		l_Request.Assets = &m_Assets;
 		l_Request.Exposure = std::exp2(m_ExposureStops);
 
 		return l_Request;

@@ -15,7 +15,7 @@ namespace Editor
 	namespace
 	{
 		// In enum order, the combo index is the enum value
-		constexpr std::array<const char*, 3> k_GeometryTypeNames{ "None", "Sphere", "Quad" };
+		constexpr std::array<const char*, 4> k_GeometryTypeNames{ "None", "Sphere", "Quad", "Mesh" };
 		constexpr std::array<const char*, 2> k_MaterialTypeNames{ "Diffuse", "Emissive" };
 
 		constexpr float k_TranslationStep = 0.01f;
@@ -50,7 +50,7 @@ namespace Editor
 		}
 	}
 
-	void InspectorPanel::Draw(Engine::Scene& scene, Engine::EntityId selectedEntity, EditorCommandHistory& history, EditorActions& actions)
+	void InspectorPanel::Draw(Engine::Scene& scene, const Engine::AssetManager& assets, Engine::EntityId selectedEntity, EditorCommandHistory& history, EditorActions& actions)
 	{
 		if (ImGui::Begin("Inspector"))
 		{
@@ -70,14 +70,14 @@ namespace Editor
 			}
 			else
 			{
-				DrawEntity(scene, *l_Entity, history);
+				DrawEntity(scene, assets, *l_Entity, history);
 			}
 		}
 
 		ImGui::End();
 	}
 
-	void InspectorPanel::DrawEntity(Engine::Scene& scene, Engine::Entity& entity, EditorCommandHistory& history)
+	void InspectorPanel::DrawEntity(Engine::Scene& scene, const Engine::AssetManager& assets, Engine::Entity& entity, EditorCommandHistory& history)
 	{
 		if (!m_EntityEdit.InProgress)
 		{
@@ -93,7 +93,7 @@ namespace Editor
 		TrackEntityEdit(l_VisibilityChanged, true, true, scene, entity, history, "Toggle visibility of");
 
 		DrawTransform(scene, entity, history);
-		DrawGeometry(scene, entity, history);
+		DrawGeometry(scene, assets, entity, history);
 		DrawMaterial(scene, entity, history);
 	}
 
@@ -127,7 +127,7 @@ namespace Editor
 		ImGui::TextDisabled("Quaternion  %.3f  %.3f  %.3f  %.3f", l_Rotation.x, l_Rotation.y, l_Rotation.z, l_Rotation.w);
 	}
 
-	void InspectorPanel::DrawGeometry(Engine::Scene& scene, Engine::Entity& entity, EditorCommandHistory& history)
+	void InspectorPanel::DrawGeometry(Engine::Scene& scene, const Engine::AssetManager& assets, Engine::Entity& entity, EditorCommandHistory& history)
 	{
 		ImGui::SeparatorText("Geometry");
 
@@ -138,6 +138,12 @@ namespace Editor
 		if (l_TypeChanged)
 		{
 			l_Geometry.Type = static_cast<Engine::GeometryType>(l_Type);
+
+			// A type switched to Mesh starts on the first loaded mesh rather than rendering nothing until one is picked
+			if (l_Geometry.Type == Engine::GeometryType::Mesh && l_Geometry.Mesh == Engine::MeshId::Invalid && !assets.GetMeshes().empty())
+			{
+				l_Geometry.Mesh = assets.GetMeshes().front().Id;
+			}
 		}
 
 		TrackEntityEdit(l_TypeChanged, true, true, scene, entity, history, "Change geometry of");
@@ -158,6 +164,40 @@ namespace Editor
 
 				const bool l_HeightChanged = ImGui::DragFloat("Height", &l_Geometry.Height, k_SizeStep, k_MinimumSize, 0.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
 				TrackEntityEdit(l_HeightChanged, false, true, scene, entity, history, "Resize");
+				break;
+			}
+			case Engine::GeometryType::Mesh:
+			{
+				// Which mesh: a combo over the loaded assets. Changing it is an entity edit like changing the material, the mesh itself is never edited here
+				const Engine::Mesh* l_Current = assets.FindMesh(l_Geometry.Mesh);
+				const std::string l_Preview = l_Current != nullptr ? l_Current->Name : (l_Geometry.Mesh == Engine::MeshId::Invalid ? std::string("None") : std::string("Missing"));
+
+				bool l_Changed = false;
+				if (ImGui::BeginCombo("Mesh", l_Preview.c_str()))
+				{
+					for (const Engine::Mesh& l_Mesh : assets.GetMeshes())
+					{
+						const std::string l_Label = std::format("{}##{}", l_Mesh.Name, std::to_underlying(l_Mesh.Id));
+						if (ImGui::Selectable(l_Label.c_str(), l_Mesh.Id == l_Geometry.Mesh))
+						{
+							l_Changed = l_Geometry.Mesh != l_Mesh.Id;
+							l_Geometry.Mesh = l_Mesh.Id;
+						}
+					}
+
+					ImGui::EndCombo();
+				}
+
+				TrackEntityEdit(l_Changed, true, true, scene, entity, history, "Change mesh of");
+
+				if (l_Current != nullptr)
+				{
+					ImGui::TextDisabled("%u triangles, %zu vertices, %s", l_Current->GetTriangleCount(), l_Current->Vertices.size(), l_Current->Source.c_str());
+				}
+				else
+				{
+					ImGui::TextDisabled("No mesh, renders nothing");
+				}
 				break;
 			}
 			default:

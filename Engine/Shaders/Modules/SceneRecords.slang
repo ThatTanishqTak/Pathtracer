@@ -4,12 +4,34 @@ module SceneRecords;
 // Must match Engine::RenderPrimitiveRecord. The matrices are four columns each, so no matrix layout convention is involved
 public struct PrimitiveRecord
 {
-	public float4 ObjectToWorld[4]; // world = C0 * x + C1 * y + C2 * z + C3
-	public float4 WorldToObject[4];
-	public uint Type;
-	public uint MaterialIndex;
-	public uint EntityIdLow;
-	public uint EntityIdHigh;
+    public float4 ObjectToWorld[4]; // world = C0 * x + C1 * y + C2 * z + C3
+    public float4 WorldToObject[4];
+    public uint Type;
+    public uint MaterialIndex;
+    public uint EntityIdLow;
+    public uint EntityIdHigh;
+    public uint FirstTriangle; // Mesh only: the range in the triangle buffer, zero triangles for the analytic shapes
+    public uint TriangleCount;
+    public uint Padding0;
+    public uint Padding1;
+    public float4 BoundsMin; // Mesh only: object-space bounds tested before the triangle loop, w unused
+    public float4 BoundsMax;
+};
+
+// Must match Engine::RenderVertexRecord. Object space, the texture coordinate in the two w components
+public struct VertexRecord
+{
+    public float4 PositionU;
+    public float4 NormalV;
+};
+
+// Must match Engine::RenderTriangleRecord, indices into the vertex buffer
+public struct TriangleRecord
+{
+    public uint V0;
+    public uint V1;
+    public uint V2;
+    public uint Padding0;
 };
 
 // Must match Engine::RenderMaterialRecord
@@ -26,6 +48,7 @@ public struct MaterialRecord
 // Must match Engine::RenderPrimitiveType
 public static const uint k_PrimitiveSphere = 0;
 public static const uint k_PrimitiveQuad = 1;
+public static const uint k_PrimitiveMesh = 2;
 
 // Must match Engine::MaterialType
 public static const uint k_MaterialDiffuse = 0;

@@ -13,7 +13,8 @@ namespace Editor
 	class InspectorPanel
 	{
 	public:
-		void Draw(Engine::Scene& scene, Engine::EntityId selectedEntity, EditorCommandHistory& history, EditorActions& actions);
+		// The assets are read only here: the mesh combo lists what is loaded, it never loads anything
+		void Draw(Engine::Scene& scene, const Engine::AssetManager& assets, Engine::EntityId selectedEntity, EditorCommandHistory& history, EditorActions& actions);
 
 	private:
 		template <typename T>
@@ -23,9 +24,9 @@ namespace Editor
 			bool InProgress = false;
 		};
 
-		void DrawEntity(Engine::Scene& scene, Engine::Entity& entity, EditorCommandHistory& history);
+		void DrawEntity(Engine::Scene& scene, const Engine::AssetManager& assets, Engine::Entity& entity, EditorCommandHistory& history);
 		void DrawTransform(Engine::Scene& scene, Engine::Entity& entity, EditorCommandHistory& history);
-		void DrawGeometry(Engine::Scene& scene, Engine::Entity& entity, EditorCommandHistory& history);
+		void DrawGeometry(Engine::Scene& scene, const Engine::AssetManager& assets, Engine::Entity& entity, EditorCommandHistory& history);
 		void DrawMaterial(Engine::Scene& scene, Engine::Entity& entity, EditorCommandHistory& history);
 		void DrawSceneSettings(Engine::Scene& scene, EditorCommandHistory& history, EditorActions& actions);
 

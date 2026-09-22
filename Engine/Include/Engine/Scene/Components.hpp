@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Assets/Mesh.hpp"
 #include "Engine/Math/Math.hpp"
 
 #include <cstdint>
@@ -14,12 +15,13 @@ namespace Engine
 		Math::Vector3 Scale{ 1.0f, 1.0f, 1.0f };
 	};
 
-	// Values match the constants in Diagnostic.slang
+	// Values match the constants in Modules/SceneRecords.slang
 	enum class GeometryType : uint8_t
 	{
 		None = 0, // The entity has no renderable shape
 		Sphere, // Centre at the object origin, Radius before the transform's scale
 		Quad, // Width by Height in the object XY plane, centred on the origin, normal along object +Z, two-sided
+		Mesh, // A triangle mesh asset in object space, referenced by Id and shared by any number of entities
 	};
 
 	struct GeometryComponent
@@ -29,6 +31,7 @@ namespace Engine
 		float Radius = 0.5f; // Sphere
 		float Width = 1.0f; // Quad
 		float Height = 1.0f; // Quad
+		MeshId Mesh = MeshId::Invalid; // Mesh, resolved through the AssetManager. Invalid renders nothing
 	};
 
 	inline Math::Quaternion GetSafeRotation(const TransformComponent& transform)
@@ -48,7 +51,7 @@ namespace Engine
 		return glm::translate(Math::Matrix4(1.0f), transform.Translation) * glm::mat4_cast(GetSafeRotation(transform)) * glm::scale(Math::Matrix4(1.0f), transform.Scale);
 	}
 
-	// The object-space scale that turns the unit shape into the geometry: a sphere's radius on every axis, a quad's width and height in its plane. The renderer and picking both fold it behind the transform so they intersect the same unit shapes. False for None or a non-finite parameter
+	// The object-space scale that turns the unit shape into the geometry: a sphere's radius on every axis, a quad's width and height in its plane, one for a mesh whose vertices already are the object. The renderer and picking both fold it behind the transform so they intersect the same shapes. False for None or a non-finite parameter
 	inline bool GetGeometryScale(const GeometryComponent& geometry, Math::Vector3& scale)
 	{
 		switch (geometry.Type)
@@ -64,6 +67,12 @@ namespace Engine
 				scale = Math::Vector3(geometry.Width, geometry.Height, 1.0f);
 
 				return std::isfinite(geometry.Width) && std::isfinite(geometry.Height);
+			}
+			case GeometryType::Mesh:
+			{
+				scale = Math::Vector3(1.0f);
+
+				return true;
 			}
 			default:
 			{

@@ -1,5 +1,6 @@
 #include "Engine/Renderer/RenderScene.hpp"
 
+#include "Engine/Assets/AssetManager.hpp"
 #include "Engine/Scene/Scene.hpp"
 #include "Engine/Core/Log.hpp"
 
@@ -28,9 +29,9 @@ namespace Engine
 			return l_Columns;
 		}
 
-		std::array<float, 4> ToFloat4(const Math::Vector3& value)
+		std::array<float, 4> ToFloat4(const Math::Vector3& value, float w = 0.0f)
 		{
-			return { value.x, value.y, value.z, 0.0f };
+			return { value.x, value.y, value.z, w };
 		}
 
 		bool IsFinite(const Math::Matrix4& matrix)
@@ -67,16 +68,76 @@ namespace Engine
 				return false;
 			}
 
-			type = entity.Geometry.Type == GeometryType::Quad ? RenderPrimitiveType::Quad : RenderPrimitiveType::Sphere;
+			switch (entity.Geometry.Type)
+			{
+				case GeometryType::Quad:
+				{
+					type = RenderPrimitiveType::Quad;
+					break;
+				}
+				case GeometryType::Mesh:
+				{
+					type = RenderPrimitiveType::Mesh;
+					break;
+				}
+				default:
+				{
+					type = RenderPrimitiveType::Sphere;
+					break;
+				}
+			}
 
 			return true;
 		}
+
+		// Where one mesh landed in the packed arrays, so every entity that shares it points at the same triangles and Part B builds one BLAS per entry
+		struct MeshRange
+		{
+			uint32_t FirstTriangle = 0;
+			uint32_t TriangleCount = 0;
+			MeshBounds Bounds;
+		};
+
+		// Appends the mesh once. The AssetManager validated it, so the indices are trusted here and in the shader
+		MeshRange AppendMesh(const Mesh& mesh, RenderScene& renderScene)
+		{
+			const uint32_t l_FirstVertex = static_cast<uint32_t>(renderScene.Vertices.size());
+			for (const MeshVertex& l_Vertex : mesh.Vertices)
+			{
+				renderScene.Vertices.push_back(RenderVertexRecord
+					{
+						.PositionU = ToFloat4(l_Vertex.Position, l_Vertex.TexCoord.x),
+						.NormalV = ToFloat4(l_Vertex.Normal, l_Vertex.TexCoord.y),
+					});
+			}
+
+			const MeshRange l_Range
+			{
+				.FirstTriangle = static_cast<uint32_t>(renderScene.Triangles.size()),
+				.TriangleCount = mesh.GetTriangleCount(),
+				.Bounds = mesh.Bounds,
+			};
+
+			for (size_t i_Index = 0; i_Index + 2 < mesh.Indices.size(); i_Index += 3)
+			{
+				renderScene.Triangles.push_back(RenderTriangleRecord
+					{
+						.V0 = l_FirstVertex + mesh.Indices[i_Index],
+						.V1 = l_FirstVertex + mesh.Indices[i_Index + 1],
+						.V2 = l_FirstVertex + mesh.Indices[i_Index + 2],
+					});
+			}
+
+			return l_Range;
+		}
 	}
 
-	void BuildRenderScene(const Scene& scene, RenderScene& renderScene)
+	void BuildRenderScene(const Scene& scene, const AssetManager* assets, RenderScene& renderScene)
 	{
 		renderScene.Primitives.clear();
 		renderScene.Materials.clear();
+		renderScene.Vertices.clear();
+		renderScene.Triangles.clear();
 
 		// Index 0 is the fallback, so an entity without a material or with a dangling reference renders grey instead of reading past the array
 		renderScene.Materials.push_back(ToRecord(Material{}));
@@ -87,6 +148,8 @@ namespace Engine
 			l_MaterialIndices.emplace(l_Material.Id, static_cast<uint32_t>(renderScene.Materials.size()));
 			renderScene.Materials.push_back(ToRecord(l_Material));
 		}
+
+		std::unordered_map<MeshId, MeshRange> l_MeshRanges;
 
 		uint32_t l_Skipped = 0;
 		for (const Entity& l_Entity : scene.GetEntities())
@@ -104,6 +167,31 @@ namespace Engine
 				l_Skipped += 1;
 
 				continue;
+			}
+
+			// A mesh entity needs its mesh: appended on the first entity that uses it, found again for every other
+			MeshRange l_MeshRange;
+			if (l_Type == RenderPrimitiveType::Mesh)
+			{
+				const auto l_Found = l_MeshRanges.find(l_Entity.Geometry.Mesh);
+				if (l_Found != l_MeshRanges.end())
+				{
+					l_MeshRange = l_Found->second;
+				}
+				else
+				{
+					const Mesh* l_Mesh = assets != nullptr ? assets->FindMesh(l_Entity.Geometry.Mesh) : nullptr;
+					if (l_Mesh == nullptr)
+					{
+						PT_CORE_WARN("Entity '{}' ({}) references mesh {} which is not loaded and is not rendered", l_Entity.Name, std::to_underlying(l_Entity.Id), std::to_underlying(l_Entity.Geometry.Mesh));
+						l_Skipped += 1;
+
+						continue;
+					}
+
+					l_MeshRange = AppendMesh(*l_Mesh, renderScene);
+					l_MeshRanges.emplace(l_Entity.Geometry.Mesh, l_MeshRange);
+				}
 			}
 
 			const Math::Vector3 l_TotalScale = l_Entity.Transform.Scale * l_GeometryScale;
@@ -149,12 +237,16 @@ namespace Engine
 					.MaterialIndex = l_MaterialIndex,
 					.EntityIdLow = static_cast<uint32_t>(l_EntityId & 0xFFFFFFFFu),
 					.EntityIdHigh = static_cast<uint32_t>(l_EntityId >> 32),
+					.FirstTriangle = l_MeshRange.FirstTriangle,
+					.TriangleCount = l_MeshRange.TriangleCount,
+					.BoundsMin = ToFloat4(l_MeshRange.Bounds.Min),
+					.BoundsMax = ToFloat4(l_MeshRange.Bounds.Max),
 				});
 		}
 
 		renderScene.EnvironmentRadiance = scene.GetEnvironment().Radiance;
 		renderScene.Revision = scene.GetRadianceRevision();
 
-		PT_CORE_TRACE("Render scene built for revision {}: {} primitives, {} materials, {} entities skipped", renderScene.Revision, renderScene.Primitives.size(), renderScene.Materials.size(), l_Skipped);
+		PT_CORE_TRACE("Render scene built for revision {}: {} primitives, {} materials, {} meshes with {} vertices and {} triangles, {} entities skipped", renderScene.Revision, renderScene.Primitives.size(), renderScene.Materials.size(), l_MeshRanges.size(), renderScene.Vertices.size(), renderScene.Triangles.size(), l_Skipped);
 	}
 }

@@ -14,7 +14,7 @@ namespace Editor
 
 		bool SameGeometry(const Engine::GeometryComponent& a, const Engine::GeometryComponent& b)
 		{
-			return a.Type == b.Type && a.Radius == b.Radius && a.Width == b.Width && a.Height == b.Height;
+			return a.Type == b.Type && a.Radius == b.Radius && a.Width == b.Width && a.Height == b.Height && a.Mesh == b.Mesh;
 		}
 	}
 

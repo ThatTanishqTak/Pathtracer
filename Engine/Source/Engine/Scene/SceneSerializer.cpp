@@ -1,5 +1,6 @@
 #include "Engine/Scene/SceneSerializer.hpp"
 
+#include "Engine/Assets/AssetManager.hpp"
 #include "Engine/Core/Log.hpp"
 #include "Engine/Scene/Camera.hpp"
 
@@ -112,6 +113,10 @@ namespace Engine
 				{
 					return "quad";
 				}
+				case GeometryType::Mesh:
+				{
+					return "mesh";
+				}
 			}
 
 			return "none";
@@ -130,7 +135,7 @@ namespace Engine
 			return l_Object;
 		}
 
-		Json ToJson(const Entity& entity)
+		Json ToJson(const Entity& entity, const AssetManager& assets)
 		{
 			// Every geometry parameter is written whatever the type, so a round trip is exact and a type change in a text editor needs no new fields
 			Json l_Geometry = Json::object();
@@ -138,6 +143,18 @@ namespace Engine
 			l_Geometry["radius"] = ToJsonNumber(entity.Geometry.Radius);
 			l_Geometry["width"] = ToJsonNumber(entity.Geometry.Width);
 			l_Geometry["height"] = ToJsonNumber(entity.Geometry.Height);
+
+			// The mesh by its source, the one name that means the same thing in another process. An entity that chose no mesh writes none, an Id the assets do not hold is a bug in whoever set it
+			if (entity.Geometry.Mesh != MeshId::Invalid)
+			{
+				const Mesh* l_Mesh = assets.FindMesh(entity.Geometry.Mesh);
+				if (l_Mesh == nullptr)
+				{
+					Fail(std::format("entity '{}'", entity.Name), std::format("references mesh {}, which the asset manager does not hold", std::to_underlying(entity.Geometry.Mesh)));
+				}
+
+				l_Geometry["mesh"] = l_Mesh->Source;
+			}
 
 			Json l_Transform = Json::object();
 			l_Transform["translation"] = ToJson(entity.Transform.Translation);
@@ -155,7 +172,7 @@ namespace Engine
 			return l_Object;
 		}
 
-		Json ToJson(const Scene& scene)
+		Json ToJson(const Scene& scene, const AssetManager& assets)
 		{
 			Json l_Environment = Json::object();
 			l_Environment["radiance"] = ToJson(scene.GetEnvironment().Radiance);
@@ -173,7 +190,7 @@ namespace Engine
 			Json l_Entities = Json::array();
 			for (const Entity& l_Entity : scene.GetEntities())
 			{
-				l_Entities.push_back(ToJson(l_Entity));
+				l_Entities.push_back(ToJson(l_Entity, assets));
 			}
 
 			Json l_Document = Json::object();
@@ -399,7 +416,12 @@ namespace Engine
 				return GeometryType::Quad;
 			}
 
-			Fail(context, std::format("unknown geometry type '{}', expected \"none\", \"sphere\" or \"quad\"", l_Text));
+			if (l_Text == "mesh")
+			{
+				return GeometryType::Mesh;
+			}
+
+			Fail(context, std::format("unknown geometry type '{}', expected \"none\", \"sphere\", \"quad\" or \"mesh\"", l_Text));
 		}
 
 		Material ReadMaterial(const Json& object, std::string_view context)
@@ -420,7 +442,7 @@ namespace Engine
 			return l_Material;
 		}
 
-		Entity ReadEntity(const Json& object, std::string_view context, std::vector<std::string>& warnings)
+		Entity ReadEntity(const Json& object, std::string_view context, AssetManager& assets, std::vector<std::string>& warnings)
 		{
 			Entity l_Entity;
 			l_Entity.Id = static_cast<EntityId>(ReadId(RequireField(object, context, "id"), std::format("{}.id", context)));
@@ -463,6 +485,24 @@ namespace Engine
 					l_Entity.Geometry.Height = ReadFloat(*l_Height, std::format("{}.height", l_Context));
 				}
 
+				// The mesh is loaded through the assets by its source. A mesh that cannot be loaded, or a mesh entity that names none, is a warning: the entity renders nothing and the rest of the scene opens, the way a missing material falls back rather than failing the file
+				if (const Json* l_Mesh = OptionalField(l_Geometry, l_Context, "mesh"))
+				{
+					const std::string l_MeshContext = std::format("{}.mesh", l_Context);
+					const std::string l_Source = ReadString(*l_Mesh, l_MeshContext);
+
+					std::string l_Error;
+					l_Entity.Geometry.Mesh = assets.LoadMesh(l_Source, &l_Error);
+					if (l_Entity.Geometry.Mesh == MeshId::Invalid)
+					{
+						warnings.push_back(std::format("{}: cannot load '{}': {}, the entity renders nothing", l_MeshContext, l_Source, l_Error));
+					}
+				}
+				else if (l_Entity.Geometry.Type == GeometryType::Mesh)
+				{
+					warnings.push_back(std::format("{}: a mesh entity without a mesh renders nothing", l_Context));
+				}
+
 				// The renderer skips a degenerate shape with its own warning every extraction, the file says so once up front
 				const bool l_Degenerate = (l_Entity.Geometry.Type == GeometryType::Sphere && l_Entity.Geometry.Radius <= 0.0f) || (l_Entity.Geometry.Type == GeometryType::Quad && (l_Entity.Geometry.Width <= 0.0f || l_Entity.Geometry.Height <= 0.0f));
 				if (l_Degenerate)
@@ -501,7 +541,7 @@ namespace Engine
 			return l_Counter;
 		}
 
-		void ReadDocument(const Json& document, std::string_view context, Scene& scene, std::vector<std::string>& warnings)
+		void ReadDocument(const Json& document, std::string_view context, Scene& scene, AssetManager& assets, std::vector<std::string>& warnings)
 		{
 			const Json& l_Version = RequireField(document, context, "schemaVersion");
 			if (!l_Version.is_number_unsigned() || l_Version.get<uint64_t>() != SceneSerializer::k_SchemaVersion)
@@ -572,7 +612,7 @@ namespace Engine
 				{
 					const std::string l_ItemContext = std::format("{}[{}]", l_Context, i_Entity);
 
-					Entity l_Entity = ReadEntity(l_Entities[i_Entity], l_ItemContext, warnings);
+					Entity l_Entity = ReadEntity(l_Entities[i_Entity], l_ItemContext, assets, warnings);
 					const uint64_t l_Id = std::to_underlying(l_Entity.Id);
 
 					// A reference is validated against the materials of this document, the renderer's fallback material is for deletions at runtime and not for files
@@ -611,13 +651,13 @@ namespace Engine
 		}
 	}
 
-	SceneFileResult SceneSerializer::Write(const Scene& scene, std::string& text)
+	SceneFileResult SceneSerializer::Write(const Scene& scene, std::string& text, const AssetManager& assets)
 	{
 		SceneFileResult l_Result;
 
 		try
 		{
-			text = ToJson(scene).dump(1, '\t');
+			text = ToJson(scene, assets).dump(1, '\t');
 			text.push_back('\n');
 
 			l_Result.Succeeded = true;
@@ -631,18 +671,18 @@ namespace Engine
 		return l_Result;
 	}
 
-	SceneFileResult SceneSerializer::Parse(std::string_view text, Scene& scene, std::string_view sourceName)
+	SceneFileResult SceneSerializer::Parse(std::string_view text, Scene& scene, AssetManager& assets, std::string_view sourceName)
 	{
 		SceneFileResult l_Result;
 
-		// Everything lands in a fresh scene first, so a failure anywhere below leaves the caller's scene untouched
+		// Everything lands in a fresh scene first, so a failure anywhere below leaves the caller's scene untouched. Meshes loaded on the way stay in the assets either way, a mesh is not scene content
 		Scene l_Loaded;
 
 		try
 		{
 			const Json l_Document = Json::parse(text);
 
-			ReadDocument(l_Document, sourceName, l_Loaded, l_Result.Warnings);
+			ReadDocument(l_Document, sourceName, l_Loaded, assets, l_Result.Warnings);
 		}
 		catch (const SceneFormatError& error)
 		{
@@ -666,10 +706,10 @@ namespace Engine
 		return l_Result;
 	}
 
-	SceneFileResult SceneSerializer::Save(const Scene& scene, const std::filesystem::path& path)
+	SceneFileResult SceneSerializer::Save(const Scene& scene, const std::filesystem::path& path, const AssetManager& assets)
 	{
 		std::string l_Text;
-		SceneFileResult l_Result = Write(scene, l_Text);
+		SceneFileResult l_Result = Write(scene, l_Text, assets);
 		if (!l_Result.Succeeded)
 		{
 			LogResult(l_Result, "save");
@@ -743,7 +783,7 @@ namespace Engine
 		return l_Result;
 	}
 
-	SceneFileResult SceneSerializer::Load(const std::filesystem::path& path, Scene& scene)
+	SceneFileResult SceneSerializer::Load(const std::filesystem::path& path, Scene& scene, AssetManager& assets)
 	{
 		SceneFileResult l_Result;
 
@@ -778,7 +818,7 @@ namespace Engine
 			return l_Result;
 		}
 
-		l_Result = Parse(l_Text, scene, path.string());
+		l_Result = Parse(l_Text, scene, assets, path.string());
 		LogResult(l_Result, "load");
 
 		if (l_Result.Succeeded)

@@ -78,6 +78,8 @@ namespace Engine
 
 			VulkanBuffer PrimitiveBuffer;
 			VulkanBuffer MaterialBuffer;
+			VulkanBuffer VertexBuffer; // The meshes the primitives reference, indexed through each mesh record's triangle range
+			VulkanBuffer TriangleBuffer;
 			uint64_t UploadedRevision = 0; // The RenderScene::Revision the buffers hold
 
 			VulkanBuffer PathtraceConstantBuffer; // Uniform block for Pathtrace.slang, rewritten every path-traced frame

@@ -76,6 +76,11 @@ namespace Editor
 
 		PT_APP_INFO("Asset root: {}", m_AssetRoot.string());
 
+		// The built-in meshes are loaded up front, so the Inspector's mesh list is never empty and Create finds them by source
+		m_Assets.SetAssetRoot(m_AssetRoot);
+		m_Assets.LoadMesh(Engine::AssetManager::k_CubeSource);
+		m_Assets.LoadMesh(Engine::AssetManager::k_IcosphereSource);
+
 		m_RenderSettings.Integrator.SamplesPerFrame = 1;
 		m_RenderSettings.Integrator.MaxBounces = 4;
 		m_RenderSettings.Integrator.Seed = 0;
@@ -176,9 +181,9 @@ namespace Editor
 		}
 
 		// The texture id is the previous frame's, the retired display texture keeps it valid across a resize. The gizmo edits the selection live and records its command through the history, like an Inspector drag
-		m_ViewportPanel.Draw(m_Services->GetViewTextureId(), l_Captured, m_Camera.GetCamera(), m_Scene, m_SelectedEntity, m_History);
+		m_ViewportPanel.Draw(m_Services->GetViewTextureId(), l_Captured, m_Camera.GetCamera(), m_Scene, m_Assets, m_SelectedEntity, m_History);
 		m_SceneHierarchyPanel.Draw(m_Scene, m_SelectedEntity, *this, m_History.IsDirty(), m_ScenePath, m_FileStatus);
-		m_InspectorPanel.Draw(m_Scene, m_SelectedEntity, m_History, *this);
+		m_InspectorPanel.Draw(m_Scene, m_Assets, m_SelectedEntity, m_History, *this);
 
 		const Engine::RenderRequest l_Request = GetRenderRequest();
 		m_RenderSettingsPanel.Draw(m_RenderSettings, l_Request.View.Width, l_Request.View.Height);
@@ -868,7 +873,7 @@ namespace Editor
 		const float l_PixelY = (mouseY - l_Viewport.ImageY) * static_cast<float>(l_Viewport.ContentHeight) / l_Viewport.ImageHeight;
 
 		const Engine::Ray l_Ray = Engine::GenerateCameraRay(l_Camera, l_PixelX, l_PixelY);
-		const Engine::ScenePick l_Pick = Engine::PickClosest(m_Scene, l_Ray);
+		const Engine::ScenePick l_Pick = Engine::PickClosest(m_Scene, &m_Assets, l_Ray);
 
 		// Selection is workspace state: not a command, nothing is dirtied, and the background clears it
 		m_SelectedEntity = l_Pick.Entity;
@@ -915,6 +920,20 @@ namespace Editor
 				l_Entity.Geometry.Height = 2.0f;
 				l_Entity.Transform.Translation = l_Position;
 				l_Entity.Transform.Rotation = glm::angleAxis(Engine::Math::ToRadians(-90.0f), Engine::Math::k_Right);
+
+				l_Material.BaseColor = k_Palette[m_CreatedEntities % k_Palette.size()];
+				break;
+			}
+			case CreateEntityKind::Cube:
+			case CreateEntityKind::Icosphere:
+			{
+				// The built-in mesh by source, the same Id every time so every cube shares one mesh. Both fit the unit cube, the transform's scale sizes them
+				const bool l_Cube = kind == CreateEntityKind::Cube;
+
+				l_Entity.Name = std::format("{} {}", l_Cube ? "Cube" : "Icosphere", m_CreatedEntities);
+				l_Entity.Geometry.Type = Engine::GeometryType::Mesh;
+				l_Entity.Geometry.Mesh = m_Assets.LoadMesh(l_Cube ? Engine::AssetManager::k_CubeSource : Engine::AssetManager::k_IcosphereSource);
+				l_Entity.Transform.Translation = l_Position;
 
 				l_Material.BaseColor = k_Palette[m_CreatedEntities % k_Palette.size()];
 				break;
@@ -1030,7 +1049,7 @@ namespace Editor
 	bool EditorClient::LoadScene(const std::filesystem::path& path)
 	{
 		// The serializer already logged every warning and the error with its field context, the panel shows them again
-		const Engine::SceneFileResult l_Result = Engine::SceneSerializer::Load(path, m_Scene);
+		const Engine::SceneFileResult l_Result = Engine::SceneSerializer::Load(path, m_Scene, m_Assets);
 		if (!l_Result.Succeeded)
 		{
 			PT_APP_ERROR("Scene load failed, the current scene is unchanged: {}", l_Result.Error);
@@ -1058,7 +1077,7 @@ namespace Editor
 
 	bool EditorClient::SaveSceneTo(const std::filesystem::path& path)
 	{
-		const Engine::SceneFileResult l_Result = Engine::SceneSerializer::Save(m_Scene, path);
+		const Engine::SceneFileResult l_Result = Engine::SceneSerializer::Save(m_Scene, path, m_Assets);
 		if (!l_Result.Succeeded)
 		{
 			PT_APP_ERROR("Scene save failed: {}", l_Result.Error);
@@ -1120,6 +1139,7 @@ namespace Editor
 		l_Request.View.Settings = m_RenderSettings.Integrator;
 		l_Request.View.Mode = m_RenderSettings.Mode;
 		l_Request.ActiveScene = &m_Scene;
+		l_Request.Assets = &m_Assets;
 		l_Request.Exposure = std::exp2(m_RenderSettings.ExposureStops);
 
 		// The UI shows the view through its texture id, the swapchain is cleared under the panels instead of taking the fullscreen pass

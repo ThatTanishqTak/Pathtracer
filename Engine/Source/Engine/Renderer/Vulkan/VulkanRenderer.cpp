@@ -668,6 +668,20 @@ namespace Engine
 			.range = VK_WHOLE_SIZE,
 		};
 
+		const VkDescriptorBufferInfo l_VertexBufferInfo
+		{
+			.buffer = l_Slot.VertexBuffer.GetHandle(),
+			.offset = 0,
+			.range = VK_WHOLE_SIZE,
+		};
+
+		const VkDescriptorBufferInfo l_TriangleBufferInfo
+		{
+			.buffer = l_Slot.TriangleBuffer.GetHandle(),
+			.offset = 0,
+			.range = VK_WHOLE_SIZE,
+		};
+
 		if (request.View.Mode == DiagnosticMode::PathTraced)
 		{
 			VulkanImage& l_Accumulation = m_RenderView->GetAccumulationImage();
@@ -688,7 +702,7 @@ namespace Engine
 				.range = sizeof(PathtraceParameters),
 			};
 
-			const std::array<VkWriteDescriptorSet, 5> l_DescriptorWrites
+			const std::array<VkWriteDescriptorSet, 7> l_DescriptorWrites
 			{ {
 				{
 					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -725,6 +739,20 @@ namespace Engine
 					.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 					.pBufferInfo = &l_ConstantBufferInfo,
 				},
+				{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstBinding = 5,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+					.pBufferInfo = &l_VertexBufferInfo,
+				},
+				{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstBinding = 6,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+					.pBufferInfo = &l_TriangleBufferInfo,
+				},
 			} };
 
 			m_PathtracePipeline->Bind(commandBuffer);
@@ -749,7 +777,7 @@ namespace Engine
 				.Padding2 = 0,
 			};
 
-			const std::array<VkWriteDescriptorSet, 3> l_DescriptorWrites
+			const std::array<VkWriteDescriptorSet, 5> l_DescriptorWrites
 			{ {
 				{
 					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -771,6 +799,20 @@ namespace Engine
 					.descriptorCount = 1,
 					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 					.pBufferInfo = &l_MaterialBufferInfo,
+				},
+				{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstBinding = 3,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+					.pBufferInfo = &l_VertexBufferInfo,
+				},
+				{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstBinding = 4,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+					.pBufferInfo = &l_TriangleBufferInfo,
 				},
 			} };
 
@@ -1008,7 +1050,7 @@ namespace Engine
 			return l_Result;
 		}
 
-		const std::array<VkDescriptorSetLayoutBinding, 3> l_Bindings
+		const std::array<VkDescriptorSetLayoutBinding, 5> l_Bindings
 		{ {
 			{
 				.binding = 0,
@@ -1024,6 +1066,18 @@ namespace Engine
 			},
 			{
 				.binding = 2,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+			},
+			{
+				.binding = 3,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+			},
+			{
+				.binding = 4,
 				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = 1,
 				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -1086,7 +1140,7 @@ namespace Engine
 			return l_Result;
 		}
 
-		const std::array<VkDescriptorSetLayoutBinding, 5> l_Bindings
+		const std::array<VkDescriptorSetLayoutBinding, 7> l_Bindings
 		{ {
 			{
 				.binding = 0,
@@ -1115,6 +1169,18 @@ namespace Engine
 			{
 				.binding = 4,
 				.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+			},
+			{
+				.binding = 5,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+			},
+			{
+				.binding = 6,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = 1,
 				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 			},
@@ -1377,7 +1443,7 @@ namespace Engine
 		{
 			if (request.ActiveScene != nullptr)
 			{
-				BuildRenderScene(*request.ActiveScene, m_RenderScene);
+				BuildRenderScene(*request.ActiveScene, request.Assets, m_RenderScene);
 			}
 			else
 			{
@@ -1385,9 +1451,9 @@ namespace Engine
 			}
 		}
 
-		// 2. Upload into this slot's buffers when they hold an older revision. WaitForFrame retired the slot's previous batches, so replacing or rewriting them cannot race the GPU
+		// 2. Upload into this slot's buffers when they hold an older revision. WaitForFrame retired the slot's previous batches, so replacing or rewriting them cannot race the GPU. The mesh data rides with the revision too: Part B keys it on the assets and builds the BLAS from it once
 		FrameResources& l_Slot = m_FrameResources[frameSlot];
-		if (l_Slot.UploadedRevision == m_RenderScene.Revision && l_Slot.PrimitiveBuffer.IsInitialized() && l_Slot.MaterialBuffer.IsInitialized())
+		if (l_Slot.UploadedRevision == m_RenderScene.Revision && l_Slot.PrimitiveBuffer.IsInitialized() && l_Slot.MaterialBuffer.IsInitialized() && l_Slot.VertexBuffer.IsInitialized() && l_Slot.TriangleBuffer.IsInitialized())
 		{
 			return VK_SUCCESS;
 		}
@@ -1399,6 +1465,18 @@ namespace Engine
 		}
 
 		l_Result = UploadSceneBuffer(l_Slot.MaterialBuffer, m_RenderScene.Materials.data(), m_RenderScene.Materials.size() * sizeof(RenderMaterialRecord), sizeof(RenderMaterialRecord), "scene materials");
+		if (l_Result != VK_SUCCESS)
+		{
+			return l_Result;
+		}
+
+		l_Result = UploadSceneBuffer(l_Slot.VertexBuffer, m_RenderScene.Vertices.data(), m_RenderScene.Vertices.size() * sizeof(RenderVertexRecord), sizeof(RenderVertexRecord), "scene vertices");
+		if (l_Result != VK_SUCCESS)
+		{
+			return l_Result;
+		}
+
+		l_Result = UploadSceneBuffer(l_Slot.TriangleBuffer, m_RenderScene.Triangles.data(), m_RenderScene.Triangles.size() * sizeof(RenderTriangleRecord), sizeof(RenderTriangleRecord), "scene triangles");
 		if (l_Result != VK_SUCCESS)
 		{
 			return l_Result;
@@ -1446,6 +1524,8 @@ namespace Engine
 		{
 			l_FrameResources.PrimitiveBuffer.Shutdown();
 			l_FrameResources.MaterialBuffer.Shutdown();
+			l_FrameResources.VertexBuffer.Shutdown();
+			l_FrameResources.TriangleBuffer.Shutdown();
 			l_FrameResources.PathtraceConstantBuffer.Shutdown();
 			l_FrameResources.UploadedRevision = 0;
 		}

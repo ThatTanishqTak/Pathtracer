@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Engine/Assets/AssetManager.hpp"
+#include "Engine/Assets/Mesh.hpp"
+#include "Engine/Assets/MeshGenerators.hpp"
 #include "Engine/Core/Application.hpp"
 #include "Engine/Core/ApplicationClient.hpp"
 #include "Engine/Core/FrameTime.hpp"

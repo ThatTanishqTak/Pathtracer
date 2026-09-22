@@ -40,6 +40,13 @@ StructuredBuffer<MaterialRecord> u_Materials;
 [[vk::binding(4, 0)]]
 ConstantBuffer<PathtraceParameters> u_Parameters;
 
+// Bindings 5 and 6: the vertices and triangles of every mesh the records reference, read through each mesh record's triangle range
+[[vk::binding(5, 0)]]
+StructuredBuffer<VertexRecord> u_Vertices;
+
+[[vk::binding(6, 0)]]
+StructuredBuffer<TriangleRecord> u_Triangles;
+
 // Must match k_PathtraceWorkgroupSize
 static const uint k_WorkgroupSize = 8;
 
@@ -57,8 +64,8 @@ float3 TracePath(Ray ray, inout RandomState random)
 
 	// The camera ray is segment 0, each bounce adds one segment
 	for (uint i_Segment = 0; i_Segment <= u_Parameters.MaxBounces; ++i_Segment)
-	{
-		const Hit l_Hit = TraceClosest(ray, u_Primitives, u_Parameters.PrimitiveCount, i_Segment == 0 ? 0.0 : k_MinRayDistance, k_MaxRayDistance);
+    {
+        const Hit l_Hit = TraceClosest(ray, u_Primitives, u_Parameters.PrimitiveCount, u_Vertices, u_Triangles, i_Segment == 0 ? 0.0 : k_MinRayDistance, k_MaxRayDistance);
 		if (l_Hit.Distance < 0.0)
 		{
 			l_Radiance += l_Throughput * u_Parameters.EnvironmentRadiance.xyz;

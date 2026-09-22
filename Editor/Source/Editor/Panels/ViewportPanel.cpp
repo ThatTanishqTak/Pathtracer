@@ -145,7 +145,7 @@ namespace Editor
 		}
 	}
 
-	void ViewportPanel::Draw(uint64_t textureId, bool mouseCaptured, const Engine::Camera& camera, Engine::Scene& scene, Engine::EntityId selectedEntity, EditorCommandHistory& history)
+	void ViewportPanel::Draw(uint64_t textureId, bool mouseCaptured, const Engine::Camera& camera, Engine::Scene& scene, const Engine::AssetManager& assets, Engine::EntityId selectedEntity, EditorCommandHistory& history)
 	{
 		const ImGuiIO& l_IO = ImGui::GetIO();
 
@@ -200,7 +200,7 @@ namespace Editor
 				{
 					const Engine::Camera l_ViewCamera = GetViewCamera(camera);
 
-					DrawSelectionOutline(l_ViewCamera, *l_Selected);
+					DrawSelectionOutline(l_ViewCamera, assets, *l_Selected);
 
 					if (m_GizmoOperation != GizmoOperation::None && !mouseCaptured)
 					{
@@ -310,7 +310,7 @@ namespace Editor
 		ImGui::TextDisabled("Ctrl snaps");
 	}
 
-	void ViewportPanel::DrawSelectionOutline(const Engine::Camera& camera, const Engine::Entity& entity) const
+	void ViewportPanel::DrawSelectionOutline(const Engine::Camera& camera, const Engine::AssetManager& assets, const Engine::Entity& entity) const
 	{
 		// What the renderer draws: the unit shape behind the transform and the geometry scale. An invisible entity shows nothing to outline
 		Engine::Math::Vector3 l_GeometryScale{};
@@ -391,6 +391,48 @@ namespace Editor
 				};
 
 				l_DrawLoop(k_Corners);
+				break;
+			}
+			case Engine::GeometryType::Mesh:
+			{
+				// The object-space bounds as a box: a loop around the bottom, one around the top and the four uprights between them. A mesh the assets do not hold renders nothing and outlines nothing
+				const Engine::Mesh* l_Mesh = assets.FindMesh(entity.Geometry.Mesh);
+				if (l_Mesh == nullptr)
+				{
+					break;
+				}
+
+				const Engine::Math::Vector3& l_Min = l_Mesh->Bounds.Min;
+				const Engine::Math::Vector3& l_Max = l_Mesh->Bounds.Max;
+
+				const std::array<Engine::Math::Vector3, 4> l_Bottom
+				{
+					Engine::Math::Vector3(l_Min.x, l_Min.y, l_Min.z),
+					Engine::Math::Vector3(l_Max.x, l_Min.y, l_Min.z),
+					Engine::Math::Vector3(l_Max.x, l_Min.y, l_Max.z),
+					Engine::Math::Vector3(l_Min.x, l_Min.y, l_Max.z),
+				};
+
+				const std::array<Engine::Math::Vector3, 4> l_Top
+				{
+					Engine::Math::Vector3(l_Min.x, l_Max.y, l_Min.z),
+					Engine::Math::Vector3(l_Max.x, l_Max.y, l_Min.z),
+					Engine::Math::Vector3(l_Max.x, l_Max.y, l_Max.z),
+					Engine::Math::Vector3(l_Min.x, l_Max.y, l_Max.z),
+				};
+
+				l_DrawLoop(l_Bottom);
+				l_DrawLoop(l_Top);
+
+				for (size_t i_Corner = 0; i_Corner < l_Bottom.size(); ++i_Corner)
+				{
+					ImVec2 l_From;
+					ImVec2 l_To;
+					if (l_Project(l_Bottom[i_Corner], l_From) && l_Project(l_Top[i_Corner], l_To))
+					{
+						l_DrawList->AddLine(l_From, l_To, k_OutlineColor, k_OutlineThickness);
+					}
+				}
 				break;
 			}
 			default:

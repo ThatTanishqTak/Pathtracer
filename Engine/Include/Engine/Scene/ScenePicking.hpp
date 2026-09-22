@@ -6,6 +6,7 @@
 
 namespace Engine
 {
+	class AssetManager;
 	class Scene;
 
 	// What a ray through the scene hits first, the CPU twin of Hit in Modules/Intersection.slang with the entity in place of the material
@@ -22,6 +23,12 @@ namespace Engine
 	// Distance beyond minDistance to the unit square in the object XY plane, both sides count, negative on a miss
 	float IntersectUnitQuad(const Math::Vector3& origin, const Math::Vector3& direction, float minDistance);
 
-	// The closest entity the renderer would draw: visible, with geometry and a usable transform, intersected in object space through the same matrices BuildRenderScene uploads. A brute-force loop over every entity until Step 13 adds acceleration
-	ScenePick PickClosest(const Scene& scene, const Ray& ray);
+	// Whether the ray overlaps an axis-aligned box somewhere inside (minDistance, maxDistance), the slab test the mesh loop rejects with before touching a triangle
+	bool IntersectBounds(const Math::Vector3& origin, const Math::Vector3& direction, const Math::Vector3& boundsMin, const Math::Vector3& boundsMax, float minDistance, float maxDistance);
+
+	// Distance beyond minDistance to one triangle, both sides count, negative on a miss. On a hit, barycentrics holds the weights of the second and third vertex, the first vertex takes the rest
+	float IntersectTriangle(const Math::Vector3& origin, const Math::Vector3& direction, const Math::Vector3& p0, const Math::Vector3& p1, const Math::Vector3& p2, float minDistance, Math::Vector2& barycentrics);
+
+	// The closest entity the renderer would draw: visible, with geometry and a usable transform, intersected in object space through the same matrices BuildRenderScene uploads. Mesh entities are resolved through the assets, and skipped when they are null. A brute-force loop over every entity and, inside a mesh's bounds, every triangle, until Part B adds acceleration
+	ScenePick PickClosest(const Scene& scene, const AssetManager* assets, const Ray& ray);
 }

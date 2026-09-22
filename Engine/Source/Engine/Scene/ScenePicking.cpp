@@ -1,7 +1,9 @@
 #include "Engine/Scene/ScenePicking.hpp"
 
+#include "Engine/Assets/AssetManager.hpp"
 #include "Engine/Scene/Scene.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace Engine
@@ -13,6 +15,12 @@ namespace Engine
 
 		// The same limit BuildRenderScene rejects at, so a click can only pick what the image shows
 		constexpr float k_MinimumScale = 1e-6f;
+
+		// A direction component below this runs parallel to the slab, and a determinant below it a ray parallel to the triangle's plane. Both match the shader
+		constexpr float k_ParallelEpsilon = 1e-12f;
+
+		// Nothing in a scene is this far away, the same far limit the shader's primary rays use
+		constexpr float k_MaxRayDistance = 1e30f;
 
 		bool IsFinite(const Math::Matrix4& matrix)
 		{
@@ -28,6 +36,31 @@ namespace Engine
 			}
 
 			return true;
+		}
+
+		// The closest triangle of one mesh along an object-space ray, the CPU twin of the mesh branch in TraceClosest. Only triangles nearer than maxDistance count, so the bounds test and the loop prune against the best hit so far
+		float IntersectMesh(const Mesh& mesh, const Math::Vector3& origin, const Math::Vector3& direction, float minDistance, float maxDistance)
+		{
+			if (!IntersectBounds(origin, direction, mesh.Bounds.Min, mesh.Bounds.Max, minDistance, maxDistance))
+			{
+				return k_Miss;
+			}
+
+			float l_Closest = k_Miss;
+			float l_Limit = maxDistance;
+
+			for (size_t i_Index = 0; i_Index + 2 < mesh.Indices.size(); i_Index += 3)
+			{
+				Math::Vector2 l_Barycentrics;
+				const float l_Distance = IntersectTriangle(origin, direction, mesh.Vertices[mesh.Indices[i_Index]].Position, mesh.Vertices[mesh.Indices[i_Index + 1]].Position, mesh.Vertices[mesh.Indices[i_Index + 2]].Position, minDistance, l_Barycentrics);
+				if (l_Distance > 0.0f && l_Distance < l_Limit)
+				{
+					l_Closest = l_Distance;
+					l_Limit = l_Distance;
+				}
+			}
+
+			return l_Closest;
 		}
 	}
 
@@ -78,7 +111,84 @@ namespace Engine
 		return l_Distance;
 	}
 
-	ScenePick PickClosest(const Scene& scene, const Ray& ray)
+	bool IntersectBounds(const Math::Vector3& origin, const Math::Vector3& direction, const Math::Vector3& boundsMin, const Math::Vector3& boundsMax, float minDistance, float maxDistance)
+	{
+		float l_Enter = minDistance;
+		float l_Exit = maxDistance;
+
+		for (int i_Axis = 0; i_Axis < 3; ++i_Axis)
+		{
+			// Parallel to this pair of slabs: the ray is inside them for its whole length or misses the box outright, no division and no NaN either way
+			if (std::abs(direction[i_Axis]) < k_ParallelEpsilon)
+			{
+				if (origin[i_Axis] < boundsMin[i_Axis] || origin[i_Axis] > boundsMax[i_Axis])
+				{
+					return false;
+				}
+
+				continue;
+			}
+
+			const float l_Inverse = 1.0f / direction[i_Axis];
+			float l_Near = (boundsMin[i_Axis] - origin[i_Axis]) * l_Inverse;
+			float l_Far = (boundsMax[i_Axis] - origin[i_Axis]) * l_Inverse;
+			if (l_Near > l_Far)
+			{
+				std::swap(l_Near, l_Far);
+			}
+
+			l_Enter = std::max(l_Enter, l_Near);
+			l_Exit = std::min(l_Exit, l_Far);
+			if (l_Enter > l_Exit)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	float IntersectTriangle(const Math::Vector3& origin, const Math::Vector3& direction, const Math::Vector3& p0, const Math::Vector3& p1, const Math::Vector3& p2, float minDistance, Math::Vector2& barycentrics)
+	{
+		// Möller-Trumbore, the same steps in the same order as the shader so both sides agree on the edge cases
+		barycentrics = Math::Vector2(0.0f, 0.0f);
+
+		const Math::Vector3 l_Edge1 = p1 - p0;
+		const Math::Vector3 l_Edge2 = p2 - p0;
+		const Math::Vector3 l_P = glm::cross(direction, l_Edge2);
+		const float l_Determinant = glm::dot(l_Edge1, l_P);
+		if (std::abs(l_Determinant) < k_ParallelEpsilon)
+		{
+			return k_Miss;
+		}
+
+		const float l_InverseDeterminant = 1.0f / l_Determinant;
+		const Math::Vector3 l_T = origin - p0;
+		const float l_U = glm::dot(l_T, l_P) * l_InverseDeterminant;
+		if (l_U < 0.0f || l_U > 1.0f)
+		{
+			return k_Miss;
+		}
+
+		const Math::Vector3 l_Q = glm::cross(l_T, l_Edge1);
+		const float l_V = glm::dot(direction, l_Q) * l_InverseDeterminant;
+		if (l_V < 0.0f || l_U + l_V > 1.0f)
+		{
+			return k_Miss;
+		}
+
+		const float l_Distance = glm::dot(l_Edge2, l_Q) * l_InverseDeterminant;
+		if (l_Distance <= minDistance)
+		{
+			return k_Miss;
+		}
+
+		barycentrics = Math::Vector2(l_U, l_V);
+
+		return l_Distance;
+	}
+
+	ScenePick PickClosest(const Scene& scene, const AssetManager* assets, const Ray& ray)
 	{
 		ScenePick l_Pick;
 		l_Pick.Position = ray.Origin;
@@ -125,6 +235,16 @@ namespace Engine
 				case GeometryType::Quad:
 				{
 					l_Distance = IntersectUnitQuad(l_Origin, l_Direction, 0.0f);
+					break;
+				}
+				case GeometryType::Mesh:
+				{
+					// A mesh the renderer skipped, unloaded or unknown to the assets, cannot be picked either
+					const Mesh* l_Mesh = assets != nullptr ? assets->FindMesh(l_Entity.Geometry.Mesh) : nullptr;
+					if (l_Mesh != nullptr)
+					{
+						l_Distance = IntersectMesh(*l_Mesh, l_Origin, l_Direction, 0.0f, l_Pick.Distance > 0.0f ? l_Pick.Distance : k_MaxRayDistance);
+					}
 					break;
 				}
 				default:
