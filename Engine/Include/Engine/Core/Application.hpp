@@ -22,9 +22,13 @@ namespace Engine
 	};
 
 	class ApplicationClient;
+	class ChildProcess;
 	class FileDialog;
 	struct FileDialogRequest;
 	struct FileDialogResult;
+	struct ProcessExit;
+	struct ProcessLaunchRequest;
+	struct ProcessLaunchResult;
 	class Platform;
 	class Renderer;
 	class UILayer;
@@ -65,6 +69,10 @@ namespace Engine
 		bool IsFileDialogOpen() const;
 		std::optional<FileDialogResult> PollFileDialog();
 
+		ProcessLaunchResult LaunchProcess(const ProcessLaunchRequest& request);
+		bool IsProcessRunning() const;
+		std::optional<ProcessExit> PollProcess();
+
 		const ApplicationSpecification& GetSpecification() const;
 
 	private:
@@ -76,6 +84,7 @@ namespace Engine
 		std::unique_ptr<Platform> m_Platform;
 		std::unique_ptr<Window> m_Window;
 		std::unique_ptr<FileDialog> m_FileDialog;
+		std::unique_ptr<ChildProcess> m_ChildProcess;
 		std::unique_ptr<UILayer> m_UILayer;
 		std::unique_ptr<Renderer> m_Renderer;
 		std::unique_ptr<ApplicationClient> m_Client;

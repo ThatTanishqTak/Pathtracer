@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace Engine
 {
@@ -39,6 +40,24 @@ namespace Engine
 		std::string Error;
 	};
 
+	struct ProcessLaunchRequest
+	{
+		std::filesystem::path Executable;
+
+		std::vector<std::filesystem::path> Arguments;
+	};
+
+	struct ProcessLaunchResult
+	{
+		bool Started = false;
+		std::string Error;
+	};
+
+	struct ProcessExit
+	{
+		int ExitCode = 0;
+	};
+
 	class ApplicationServices
 	{
 	public:
@@ -62,6 +81,10 @@ namespace Engine
 		bool ShowFileDialog(const FileDialogRequest& request);
 		bool IsFileDialogOpen() const;
 		std::optional<FileDialogResult> PollFileDialog();
+
+		ProcessLaunchResult LaunchProcess(const ProcessLaunchRequest& request);
+		bool IsProcessRunning() const;
+		std::optional<ProcessExit> PollProcess();
 
 	private:
 		Application* m_Application = nullptr;

@@ -42,6 +42,7 @@ namespace Editor
 			None,
 			NewScene,
 			OpenScene,
+			LaunchSandbox,
 			Exit,
 		};
 
@@ -61,8 +62,12 @@ namespace Editor
 
 		void RequestNewScene();
 		void RequestOpenScene();
+		void RequestLaunchSandbox();
 		void RequestExit();
 		void RunPendingAction();
+
+		void LaunchSandbox();
+		void PollSandbox();
 
 		void NewScene();
 		void ShowOpenDialog();

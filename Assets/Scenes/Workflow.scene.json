@@ -1,0 +1,168 @@
+{
+	"schemaVersion": 1,
+	"name": "Untitled",
+	"nextEntityId": "4",
+	"nextMaterialId": "4",
+	"environment": {
+		"radiance": [
+			0.05,
+			0.07,
+			0.1
+		]
+	},
+	"playerSpawn": {
+		"position": [
+			0.0,
+			1.7,
+			5.0
+		],
+		"orientation": [
+			0.0,
+			0.0,
+			0.0,
+			1.0
+		]
+	},
+	"materials": [
+		{
+			"id": "1",
+			"name": "Quad 1 material",
+			"type": "diffuse",
+			"baseColor": [
+				0.3,
+				0.7,
+				0.35
+			],
+			"emissionColor": [
+				1.0,
+				1.0,
+				1.0
+			],
+			"emissionStrength": 0.0
+		},
+		{
+			"id": "2",
+			"name": "Sphere 2 material",
+			"type": "diffuse",
+			"baseColor": [
+				0.3,
+				0.45,
+				0.85
+			],
+			"emissionColor": [
+				1.0,
+				1.0,
+				1.0
+			],
+			"emissionStrength": 0.0
+		},
+		{
+			"id": "3",
+			"name": "Area light 3 material",
+			"type": "emissive",
+			"baseColor": [
+				0.0,
+				0.0,
+				0.0
+			],
+			"emissionColor": [
+				1.0,
+				0.95,
+				0.9
+			],
+			"emissionStrength": 8.0
+		}
+	],
+	"entities": [
+		{
+			"id": "1",
+			"name": "Quad 1",
+			"visible": true,
+			"transform": {
+				"translation": [
+					0.0,
+					0.0,
+					-4.0
+				],
+				"rotation": [
+					-0.70710677,
+					-0.0,
+					-0.0,
+					0.70710677
+				],
+				"scale": [
+					1.0,
+					1.0,
+					1.0
+				]
+			},
+			"geometry": {
+				"type": "quad",
+				"radius": 0.5,
+				"width": 2.0,
+				"height": 2.0
+			},
+			"material": "1"
+		},
+		{
+			"id": "2",
+			"name": "Sphere 2",
+			"visible": true,
+			"transform": {
+				"translation": [
+					0.21765399,
+					1.373214,
+					-3.7805388
+				],
+				"rotation": [
+					0.0,
+					0.0,
+					0.0,
+					1.0
+				],
+				"scale": [
+					1.0,
+					1.0,
+					1.0
+				]
+			},
+			"geometry": {
+				"type": "sphere",
+				"radius": 0.5,
+				"width": 1.0,
+				"height": 1.0
+			},
+			"material": "2"
+		},
+		{
+			"id": "3",
+			"name": "Area light 3",
+			"visible": true,
+			"transform": {
+				"translation": [
+					-0.11185783,
+					3.114007,
+					-5.457594
+				],
+				"rotation": [
+					0.27815455,
+					0.0,
+					0.0,
+					0.96053636
+				],
+				"scale": [
+					1.0,
+					0.9999927,
+					0.9999927
+				]
+			},
+			"geometry": {
+				"type": "quad",
+				"radius": 0.5,
+				"width": 2.0,
+				"height": 2.0
+			},
+			"material": "3"
+		}
+	]
+}

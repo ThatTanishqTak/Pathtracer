@@ -29,6 +29,13 @@ namespace Editor
 
 		constexpr const char* k_SceneFilterName = "Scene files";
 		constexpr const char* k_SceneFilterPattern = "json";
+
+		// Built next to the Editor: both executables share the output directory with Shaders/ and Assets/
+#ifdef _WIN32
+		constexpr const char* k_SandboxExecutable = "Sandbox.exe";
+#else
+		constexpr const char* k_SandboxExecutable = "Sandbox";
+#endif
 	}
 
 	EditorClient::EditorClient(EditorOptions options) : m_Options(std::move(options))
@@ -44,7 +51,7 @@ namespace Editor
 		PT_APP_INFO("Viewport: hold the right mouse button over it to look around, W A S D fly, Q and E move down and up, Shift is faster, the keys work while the cursor is over the viewport or it has the focus");
 		PT_APP_INFO("Viewport: left click selects what is under the cursor and the background clears the selection, 1 2 3 switch the gizmo to translate, rotate and scale, 4 hides it, Ctrl snaps while dragging a handle");
 		PT_APP_INFO("Panels: Scene lists the entities, creates, renames, duplicates and deletes them, Inspector edits the selection or the scene settings, Render Settings edits the mode, bounce limit, render scale, seed and exposure");
-		PT_APP_INFO("Keys: Ctrl+Z undo, Ctrl+Y redo, Ctrl+D duplicate, Delete, Ctrl+N new, Ctrl+O open, Ctrl+S save, Ctrl+Shift+S save as");
+		PT_APP_INFO("Keys: Ctrl+Z undo, Ctrl+Y redo, Ctrl+D duplicate, Delete, Ctrl+N new, Ctrl+O open, Ctrl+S save, Ctrl+Shift+S save as, Ctrl+P opens the saved scene in the Sandbox");
 
 		if (!m_Services->IsUIEnabled())
 		{
@@ -216,6 +223,15 @@ namespace Editor
 
 			ImGui::Separator();
 
+			// The Sandbox reads the file, so the item opens what is saved and asks first when the scene is ahead of it. One Sandbox at a time
+			const bool l_SandboxRunning = m_Services->IsProcessRunning();
+			if (ImGui::MenuItem(l_SandboxRunning ? "Sandbox is running" : "Open in Sandbox", "Ctrl+P", false, !l_Blocked && !l_SandboxRunning))
+			{
+				RequestLaunchSandbox();
+			}
+
+			ImGui::Separator();
+
 			if (ImGui::MenuItem("Exit", nullptr, false, !l_Blocked))
 			{
 				RequestExit();
@@ -303,6 +319,11 @@ namespace Editor
 			SaveScene();
 		}
 
+		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_P, k_Flags))
+		{
+			RequestLaunchSandbox();
+		}
+
 		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, k_Flags | ImGuiInputFlags_Repeat))
 		{
 			Undo();
@@ -355,16 +376,29 @@ namespace Editor
 				l_Verb = "opening another scene";
 				break;
 			}
+			case PendingAction::LaunchSandbox:
+			{
+				l_Verb = "opening it in the Sandbox";
+				break;
+			}
 			default:
 			{
 				break;
 			}
 		}
 
+		// The launch has its own third answer: the Sandbox reads the file, so declining the save opens the scene as it was last saved
+		const bool l_Launch = m_PendingAction == PendingAction::LaunchSandbox;
+
 		ImGui::Text("Save the changes to '%s' before %s?", m_Scene.GetName().c_str(), l_Verb);
+		if (l_Launch)
+		{
+			ImGui::TextDisabled("The Sandbox reads the file, launching without saving opens it as last saved");
+		}
+
 		ImGui::Separator();
 
-		if (ImGui::Button("Save"))
+		if (ImGui::Button(l_Launch ? "Save and launch" : "Save"))
 		{
 			ImGui::CloseCurrentPopup();
 
@@ -375,7 +409,7 @@ namespace Editor
 
 		ImGui::SameLine();
 
-		if (ImGui::Button("Don't save"))
+		if (ImGui::Button(l_Launch ? "Launch last saved" : "Don't save"))
 		{
 			ImGui::CloseCurrentPopup();
 			RunPendingAction();
@@ -419,8 +453,9 @@ namespace Editor
 
 	void EditorClient::Update(const Engine::FrameTime& time, const Engine::InputState& input)
 	{
-		// A finished dialog first, so a loaded scene renders in this frame
+		// A finished dialog first, so a loaded scene renders in this frame, then the Sandbox's exit so the menu item frees up in the same frame
 		PollFileDialog();
+		PollSandbox();
 
 		const ViewportState& l_Viewport = m_ViewportPanel.GetState();
 
@@ -573,6 +608,37 @@ namespace Editor
 		ShowOpenDialog();
 	}
 
+	void EditorClient::RequestLaunchSandbox()
+	{
+		if (m_Services->IsProcessRunning())
+		{
+			PT_APP_WARN("The Sandbox is still running, close it before opening the scene in it again");
+
+			return;
+		}
+
+		// Never saved: the Sandbox reads a file, so a Save As comes first and the launch follows a successful save. Cancelling the dialog cancels the launch
+		if (m_ScenePath.empty())
+		{
+			m_PendingAction = PendingAction::LaunchSandbox;
+			m_RunPendingAfterSave = true;
+			SaveScene();
+
+			return;
+		}
+
+		// Saved before but changed since: save first or open the file as last saved, the prompt asks
+		if (m_History.IsDirty())
+		{
+			m_PendingAction = PendingAction::LaunchSandbox;
+			m_OpenPromptRequested = true;
+
+			return;
+		}
+
+		LaunchSandbox();
+	}
+
 	void EditorClient::RequestExit()
 	{
 		if (m_History.IsDirty())
@@ -602,6 +668,11 @@ namespace Editor
 			case PendingAction::OpenScene:
 			{
 				ShowOpenDialog();
+				break;
+			}
+			case PendingAction::LaunchSandbox:
+			{
+				LaunchSandbox();
 				break;
 			}
 			case PendingAction::Exit:
@@ -690,6 +761,80 @@ namespace Editor
 		}
 
 		m_RunPendingAfterSave = false;
+	}
+
+	void EditorClient::LaunchSandbox()
+	{
+		// The Sandbox opens the file as last saved, so it must exist; the absolute form is what its ResolveScenePath takes as given, wherever the process starts from
+		std::error_code l_Error;
+		const std::filesystem::path l_ScenePath = std::filesystem::absolute(m_ScenePath, l_Error);
+		if (l_Error || !std::filesystem::is_regular_file(l_ScenePath, l_Error))
+		{
+			Engine::SceneFileResult l_Failure;
+			l_Failure.Error = l_Error ? l_Error.message() : "the file does not exist, save the scene first";
+			SetFileStatus(std::format("Could not open {} in the Sandbox", m_ScenePath.string()), l_Failure);
+
+			PT_APP_ERROR("Sandbox launch failed for {}: {}", m_ScenePath.string(), l_Failure.Error);
+
+			return;
+		}
+
+		// The same asset root the Editor resolved, so a relative path inside the scene means the same file in both applications
+		Engine::ProcessLaunchRequest l_Request;
+		l_Request.Executable = m_Services->GetExecutableDirectory() / k_SandboxExecutable;
+		l_Request.Arguments = { "--scene", l_ScenePath, "--assets", m_AssetRoot };
+
+		if (!std::filesystem::is_regular_file(l_Request.Executable, l_Error))
+		{
+			Engine::SceneFileResult l_Failure;
+			l_Failure.Error = std::format("{} was not found, build the Sandbox target", l_Request.Executable.string());
+			SetFileStatus("Could not start the Sandbox", l_Failure);
+
+			PT_APP_ERROR("Sandbox launch failed: {}", l_Failure.Error);
+
+			return;
+		}
+
+		const Engine::ProcessLaunchResult l_Result = m_Services->LaunchProcess(l_Request);
+		if (!l_Result.Started)
+		{
+			Engine::SceneFileResult l_Failure;
+			l_Failure.Error = l_Result.Error;
+			SetFileStatus("Could not start the Sandbox", l_Failure);
+
+			PT_APP_ERROR("Sandbox launch failed: {}", l_Result.Error);
+
+			return;
+		}
+
+		Engine::SceneFileResult l_Success;
+		l_Success.Succeeded = true;
+		SetFileStatus(std::format("Opened {} in the Sandbox", l_ScenePath.string()), l_Success);
+
+		PT_APP_INFO("Sandbox started on {} with the asset root {}", l_ScenePath.string(), m_AssetRoot.string());
+	}
+
+	void EditorClient::PollSandbox()
+	{
+		const std::optional<Engine::ProcessExit> l_Exit = m_Services->PollProcess();
+		if (!l_Exit)
+		{
+			return;
+		}
+
+		if (l_Exit->ExitCode == 0)
+		{
+			PT_APP_INFO("Sandbox exited");
+
+			return;
+		}
+
+		// A non-zero code is the Sandbox's fatal path, its own log above says why
+		Engine::SceneFileResult l_Failure;
+		l_Failure.Error = std::format("exit code {}", l_Exit->ExitCode);
+		SetFileStatus("The Sandbox exited with an error", l_Failure);
+
+		PT_APP_WARN("Sandbox exited with code {}", l_Exit->ExitCode);
 	}
 
 	void EditorClient::Undo()

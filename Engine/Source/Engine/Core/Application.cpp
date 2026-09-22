@@ -2,6 +2,7 @@
 
 #include "Engine/Core/ApplicationClient.hpp"
 #include "Engine/Core/FileSystem.hpp"
+#include "Engine/Platform/ChildProcess.hpp"
 #include "Engine/Platform/FileDialog.hpp"
 #include "Engine/Platform/Platform.hpp"
 #include "Engine/Window/Window.hpp"
@@ -91,6 +92,21 @@ namespace Engine
 		return m_Application->PollFileDialog();
 	}
 
+	ProcessLaunchResult ApplicationServices::LaunchProcess(const ProcessLaunchRequest& request)
+	{
+		return m_Application->LaunchProcess(request);
+	}
+
+	bool ApplicationServices::IsProcessRunning() const
+	{
+		return m_Application->IsProcessRunning();
+	}
+
+	std::optional<ProcessExit> ApplicationServices::PollProcess()
+	{
+		return m_Application->PollProcess();
+	}
+
 	Application::Application() = default;
 	Application::~Application() = default;
 
@@ -144,6 +160,7 @@ namespace Engine
 
 		m_Window->SetEventCallback([this](const InputEvent& event) { OnInputEvent(event); });
 		m_FileDialog = std::make_unique<FileDialog>();
+		m_ChildProcess = std::make_unique<ChildProcess>();
 		if (m_Specification.EnableUI)
 		{
 			m_UILayer = std::make_unique<UILayer>();
@@ -177,7 +194,7 @@ namespace Engine
 
 	void Application::Shutdown()
 	{
-		if (!m_Renderer && !m_UILayer && !m_FileDialog && !m_Window && !m_Platform && !m_Client)
+		if (!m_Renderer && !m_UILayer && !m_FileDialog && !m_ChildProcess && !m_Window && !m_Platform && !m_Client)
 		{
 			m_Initialized = false;
 
@@ -204,6 +221,12 @@ namespace Engine
 		{
 			m_FileDialog->Shutdown();
 			m_FileDialog.reset();
+		}
+
+		if (m_ChildProcess)
+		{
+			m_ChildProcess->Shutdown();
+			m_ChildProcess.reset();
 		}
 
 		if (m_Window)
@@ -566,6 +589,34 @@ namespace Engine
 		}
 
 		return m_FileDialog->Poll();
+	}
+
+	ProcessLaunchResult Application::LaunchProcess(const ProcessLaunchRequest& request)
+	{
+		if (!m_ChildProcess)
+		{
+			ProcessLaunchResult l_Result;
+			l_Result.Error = "the application is not initialized";
+
+			return l_Result;
+		}
+
+		return m_ChildProcess->Launch(request);
+	}
+
+	bool Application::IsProcessRunning() const
+	{
+		return m_ChildProcess != nullptr && m_ChildProcess->IsRunning();
+	}
+
+	std::optional<ProcessExit> Application::PollProcess()
+	{
+		if (!m_ChildProcess)
+		{
+			return std::nullopt;
+		}
+
+		return m_ChildProcess->Poll();
 	}
 
 	const ApplicationSpecification& Application::GetSpecification() const
