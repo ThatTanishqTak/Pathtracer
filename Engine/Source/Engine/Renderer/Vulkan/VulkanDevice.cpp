@@ -11,17 +11,36 @@ namespace Engine
 {
 	namespace
 	{
-		constexpr const char* k_DeviceExtensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+		// The swapchain for presentation, then the ray query set the Step 13 traversal requires: acceleration structures depend on deferred host operations, and ray queries on acceleration structures
+		constexpr const char* k_DeviceExtensions[] =
+		{
+			VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+			VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+			VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+			VK_KHR_RAY_QUERY_EXTENSION_NAME,
+		};
 
-		bool IsDeviceExtensionSupported(VkPhysicalDevice device, const char* name)
+		bool SupportsRequiredExtensions(VkPhysicalDevice device)
 		{
 			std::vector<VkExtensionProperties> l_Available;
 			if (VulkanUtilities::Enumerate(l_Available, [device](uint32_t* count, VkExtensionProperties* data) { return vkEnumerateDeviceExtensionProperties(device, nullptr, count, data); }) != VK_SUCCESS)
 			{
+				PT_CORE_TRACE("Skipped: the device extensions could not be enumerated");
+
 				return false;
 			}
 
-			return VulkanUtilities::IsExtensionSupported(l_Available, name);
+			for (const char* l_Extension : k_DeviceExtensions)
+			{
+				if (!VulkanUtilities::IsExtensionSupported(l_Available, l_Extension))
+				{
+					PT_CORE_TRACE("Skipped: {} is not supported", l_Extension);
+
+					return false;
+				}
+			}
+
+			return true;
 		}
 
 		// One queue family serves graphics, compute and present, the single-queue decision from the plan
@@ -75,8 +94,10 @@ namespace Engine
 
 		bool SupportsRequiredFeatures(VkPhysicalDevice device)
 		{
-			// Query the supported core feature chain, declared newest first so each pNext can point at the next struct
-			VkPhysicalDeviceVulkan14Features l_Supported14{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES };
+			// Query the supported feature chain, declared last link first so each pNext can point at the next struct. The extension structs are only valid on a device that has their extensions, which the extension gate established before this runs
+			VkPhysicalDeviceRayQueryFeaturesKHR l_SupportedRayQuery{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
+			VkPhysicalDeviceAccelerationStructureFeaturesKHR l_SupportedAccelerationStructure{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .pNext = &l_SupportedRayQuery };
+			VkPhysicalDeviceVulkan14Features l_Supported14{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES, .pNext = &l_SupportedAccelerationStructure };
 			VkPhysicalDeviceVulkan13Features l_Supported13{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .pNext = &l_Supported14 };
 			VkPhysicalDeviceVulkan12Features l_Supported12{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &l_Supported13 };
 			VkPhysicalDeviceVulkan11Features l_Supported11{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &l_Supported12 };
@@ -98,6 +119,8 @@ namespace Engine
 				{ "maintenance5", l_Supported14.maintenance5 },
 				{ "maintenance6", l_Supported14.maintenance6 },
 				{ "pushDescriptor", l_Supported14.pushDescriptor },
+				{ "accelerationStructure", l_SupportedAccelerationStructure.accelerationStructure },
+				{ "rayQuery", l_SupportedRayQuery.rayQuery },
 			};
 
 			for (const auto& l_Feature : l_RequiredFeatures)
@@ -338,9 +361,23 @@ namespace Engine
 		PT_CORE_TRACE("Creating Logical Device");
 
 		// Enable exactly the features that IsDeviceSuitable verified during selection, chained the same way
+		VkPhysicalDeviceRayQueryFeaturesKHR l_EnabledRayQuery
+		{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+			.rayQuery = VK_TRUE,
+		};
+
+		VkPhysicalDeviceAccelerationStructureFeaturesKHR l_EnabledAccelerationStructure
+		{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+			.pNext = &l_EnabledRayQuery,
+			.accelerationStructure = VK_TRUE,
+		};
+
 		VkPhysicalDeviceVulkan14Features l_Enabled14
 		{
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+			.pNext = &l_EnabledAccelerationStructure,
 			.maintenance5 = VK_TRUE,
 			.maintenance6 = VK_TRUE,
 			.pushDescriptor = VK_TRUE,
@@ -451,10 +488,9 @@ namespace Engine
 			return false;
 		}
 
-		if (!IsDeviceExtensionSupported(device, VK_KHR_SWAPCHAIN_EXTENSION_NAME))
+		// Before the surface and feature queries: the surface formats need the swapchain extension, and the feature chain carries the ray query structs
+		if (!SupportsRequiredExtensions(device))
 		{
-			PT_CORE_TRACE("Skipped: {} is not supported", VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-
 			return false;
 		}
 
