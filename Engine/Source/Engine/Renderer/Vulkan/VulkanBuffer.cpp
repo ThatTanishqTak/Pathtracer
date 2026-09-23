@@ -60,7 +60,7 @@ namespace Engine
 		}
 
 		VmaAllocationInfo l_AllocationInfo{};
-		const VkResult l_Result = vmaCreateBuffer(m_Allocator, &l_BufferCreateInfo, &l_AllocationCreateInfo, &m_Buffer, &m_Allocation, &l_AllocationInfo);
+		const VkResult l_Result = specification.Alignment > 0 ? vmaCreateBufferWithAlignment(m_Allocator, &l_BufferCreateInfo, &l_AllocationCreateInfo, specification.Alignment, &m_Buffer, &m_Allocation, &l_AllocationInfo) : vmaCreateBuffer(m_Allocator, &l_BufferCreateInfo, &l_AllocationCreateInfo, &m_Buffer, &m_Allocation, &l_AllocationInfo);
 		if (l_Result != VK_SUCCESS)
 		{
 			PT_CORE_ERROR("Failed vmaCreateBuffer for '{}' ({} bytes): {}", specification.DebugName, specification.Size, VulkanUtilities::ResultToString(l_Result));
@@ -90,6 +90,21 @@ namespace Engine
 			}
 		}
 
+		// The allocator was created with the device-address flag, so VMA already allocated the memory with VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT for this usage
+		if ((specification.Usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0)
+		{
+			const VkBufferDeviceAddressInfo l_AddressInfo
+			{
+				.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+				.buffer = m_Buffer,
+			};
+
+			VmaAllocatorInfo l_AllocatorInfo{};
+			vmaGetAllocatorInfo(m_Allocator, &l_AllocatorInfo);
+
+			m_DeviceAddress = vkGetBufferDeviceAddress(l_AllocatorInfo.device, &l_AddressInfo);
+		}
+
 		PT_CORE_TRACE("Buffer '{}' Created: {} bytes, {}", specification.DebugName, specification.Size, specification.Memory == BufferMemory::HostUpload ? (m_HostCoherent ? "host upload, coherent" : "host upload, flushed") : "device local");
 		PT_CORE_INFO("------- VULKAN BUFFER INITIALIZED -------");
 
@@ -112,6 +127,7 @@ namespace Engine
 
 		m_Buffer = VK_NULL_HANDLE;
 		m_Allocation = VK_NULL_HANDLE;
+		m_DeviceAddress = 0;
 		m_MappedPointer = nullptr;
 		m_HostCoherent = false;
 		m_Allocator = VK_NULL_HANDLE;

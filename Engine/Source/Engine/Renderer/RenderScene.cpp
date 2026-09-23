@@ -90,9 +90,10 @@ namespace Engine
 			return true;
 		}
 
-		// Where one mesh landed in the packed arrays, so every entity that shares it points at the same triangles and Part B builds one BLAS per entry
+		// Where one mesh landed in the packed arrays, so every entity that shares it points at the same triangles and the same BLAS
 		struct MeshRange
 		{
+			uint32_t MeshIndex = 0; // Into RenderScene::Meshes
 			uint32_t FirstTriangle = 0;
 			uint32_t TriangleCount = 0;
 			MeshBounds Bounds;
@@ -113,6 +114,7 @@ namespace Engine
 
 			const MeshRange l_Range
 			{
+				.MeshIndex = static_cast<uint32_t>(renderScene.Meshes.size()),
 				.FirstTriangle = static_cast<uint32_t>(renderScene.Triangles.size()),
 				.TriangleCount = mesh.GetTriangleCount(),
 				.Bounds = mesh.Bounds,
@@ -120,13 +122,23 @@ namespace Engine
 
 			for (size_t i_Index = 0; i_Index + 2 < mesh.Indices.size(); i_Index += 3)
 			{
-				renderScene.Triangles.push_back(RenderTriangleRecord
-					{
-						.V0 = l_FirstVertex + mesh.Indices[i_Index],
-						.V1 = l_FirstVertex + mesh.Indices[i_Index + 1],
-						.V2 = l_FirstVertex + mesh.Indices[i_Index + 2],
-					});
+				const RenderTriangleRecord l_Triangle
+				{
+					.V0 = l_FirstVertex + mesh.Indices[i_Index],
+					.V1 = l_FirstVertex + mesh.Indices[i_Index + 1],
+					.V2 = l_FirstVertex + mesh.Indices[i_Index + 2],
+				};
+
+				renderScene.Triangles.push_back(l_Triangle);
+				renderScene.Indices.insert(renderScene.Indices.end(), { l_Triangle.V0, l_Triangle.V1, l_Triangle.V2 });
 			}
+
+			renderScene.Meshes.push_back(RenderMeshRange
+				{
+					.Id = mesh.Id,
+					.FirstTriangle = l_Range.FirstTriangle,
+					.TriangleCount = l_Range.TriangleCount,
+				});
 
 			return l_Range;
 		}
@@ -138,6 +150,8 @@ namespace Engine
 		renderScene.Materials.clear();
 		renderScene.Vertices.clear();
 		renderScene.Triangles.clear();
+		renderScene.Indices.clear();
+		renderScene.Meshes.clear();
 
 		// Index 0 is the fallback, so an entity without a material or with a dangling reference renders grey instead of reading past the array
 		renderScene.Materials.push_back(ToRecord(Material{}));
@@ -239,6 +253,7 @@ namespace Engine
 					.EntityIdHigh = static_cast<uint32_t>(l_EntityId >> 32),
 					.FirstTriangle = l_MeshRange.FirstTriangle,
 					.TriangleCount = l_MeshRange.TriangleCount,
+					.MeshIndex = l_MeshRange.MeshIndex,
 					.BoundsMin = ToFloat4(l_MeshRange.Bounds.Min),
 					.BoundsMax = ToFloat4(l_MeshRange.Bounds.Max),
 				});

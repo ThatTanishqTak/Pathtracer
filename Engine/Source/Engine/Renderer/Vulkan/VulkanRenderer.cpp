@@ -1,5 +1,6 @@
 #include "Engine/Renderer/Vulkan/VulkanRenderer.hpp"
 
+#include "Engine/Renderer/Vulkan/VulkanAccelerationStructure.hpp"
 #include "Engine/Renderer/Vulkan/VulkanInstance.hpp"
 #include "Engine/Renderer/Vulkan/VulkanDevice.hpp"
 #include "Engine/Renderer/Vulkan/VulkanSurface.hpp"
@@ -25,6 +26,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
+#include <utility>
+#include <vector>
 
 namespace Engine
 {
@@ -50,7 +54,28 @@ namespace Engine
 		constexpr std::array<float, 4> k_UIClearColor{ 0.06f, 0.06f, 0.07f, 1.0f };
 
 		constexpr VkBufferUsageFlags k_SceneBufferUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		constexpr VkBufferUsageFlags k_VertexBufferUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		constexpr VkBufferUsageFlags k_BuildInputBufferUsage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		constexpr VkBufferUsageFlags k_ScratchBufferUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 		constexpr VkBufferUsageFlags k_ConstantBufferUsage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+
+		// The strictest build-input rule: instance data starts on 16 bytes, AABBs on 8, vertices and indices on their component size
+		constexpr VkDeviceSize k_SceneBufferAlignment = 16;
+
+		// The instance's custom index is 24 bits, the TLAS names a primitive record by it
+		constexpr uint32_t k_MaxInstanceCustomIndex = (1u << 24) - 1;
+
+		// Half the unit quad's box thickness along its normal: the quad is flat, a box with no depth gives a traversal nothing to enter. The quad intersector still decides the hit
+		constexpr float k_UnitQuadBoundsHalfThickness = 1e-3f;
+
+		// The unit shapes in object space, indexed by RenderPrimitiveType: the radius-one sphere and the unit square in the XY plane
+		constexpr std::array<VkAabbPositionsKHR, 2> k_UnitShapeBounds
+		{ {
+			{ -1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f },
+			{ -0.5f, -0.5f, -k_UnitQuadBoundsHalfThickness, 0.5f, 0.5f, k_UnitQuadBoundsHalfThickness },
+		} };
+
+		static_assert(static_cast<size_t>(RenderPrimitiveType::Sphere) == 0 && static_cast<size_t>(RenderPrimitiveType::Quad) == 1, "k_UnitShapeBounds and the unit shape structures are indexed by RenderPrimitiveType");
 		constexpr uint64_t k_MaxAccumulatedSamples = UINT32_MAX;
 
 		struct CameraFrameBlock
@@ -162,6 +187,109 @@ namespace Engine
 		{
 			return (value + divisor - 1) / divisor;
 		}
+
+		constexpr VkDeviceSize AlignUp(VkDeviceSize value, VkDeviceSize alignment)
+		{
+			return alignment > 1 ? (value + alignment - 1) / alignment * alignment : value;
+		}
+
+		VkAccelerationStructureGeometryKHR GetUnitShapeGeometry(VkDeviceAddress boundsAddress)
+		{
+			return VkAccelerationStructureGeometryKHR
+			{
+				.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+				.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR,
+				.geometry = {.aabbs =
+				{
+					.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR,
+					.data = {.deviceAddress = boundsAddress },
+					.stride = sizeof(VkAabbPositionsKHR),
+				} },
+				.flags = VK_GEOMETRY_OPAQUE_BIT_KHR,
+			};
+		}
+
+		// Positions are the first three floats of the vertex record, the indices are already offset by the mesh's first vertex, so every mesh reads the whole vertex buffer and starts at its own first index
+		VkAccelerationStructureGeometryKHR GetMeshGeometry(VkDeviceAddress vertexAddress, uint32_t vertexCount, VkDeviceAddress indexAddress, const RenderMeshRange& mesh)
+		{
+			return VkAccelerationStructureGeometryKHR
+			{
+				.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+				.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+				.geometry = {.triangles =
+				{
+					.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+					.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
+					.vertexData = {.deviceAddress = vertexAddress },
+					.vertexStride = sizeof(RenderVertexRecord),
+					.maxVertex = vertexCount > 0 ? vertexCount - 1 : 0,
+					.indexType = VK_INDEX_TYPE_UINT32,
+					.indexData = {.deviceAddress = indexAddress + static_cast<VkDeviceAddress>(mesh.FirstTriangle) * 3 * sizeof(uint32_t) },
+				} },
+				.flags = VK_GEOMETRY_OPAQUE_BIT_KHR,
+			};
+		}
+
+		VkAccelerationStructureGeometryKHR GetInstanceGeometry(VkDeviceAddress instanceAddress)
+		{
+			return VkAccelerationStructureGeometryKHR
+			{
+				.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+				.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+				.geometry = {.instances =
+				{
+					.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+					.arrayOfPointers = VK_FALSE,
+					.data = {.deviceAddress = instanceAddress },
+				} },
+			};
+		}
+
+		// The record's column-major ObjectToWorld as the instance's row-major 3x4, the bottom row of an affine transform is implied
+		VkTransformMatrixKHR ToInstanceTransform(const std::array<float, 16>& objectToWorld)
+		{
+			VkTransformMatrixKHR l_Transform{};
+			for (size_t i_Row = 0; i_Row < 3; ++i_Row)
+			{
+				for (size_t i_Column = 0; i_Column < 4; ++i_Column)
+				{
+					l_Transform.matrix[i_Row][i_Column] = objectToWorld[i_Column * 4 + i_Row];
+				}
+			}
+
+			return l_Transform;
+		}
+
+		// A global barrier between build stages: every earlier build on the queue, from this batch or an earlier one, is finished and visible before the next access
+		void RecordBuildBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess)
+		{
+			const VkMemoryBarrier2 l_Barrier
+			{
+				.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+				.srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+				.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+				.dstStageMask = dstStage,
+				.dstAccessMask = dstAccess,
+			};
+
+			const VkDependencyInfo l_Dependency
+			{
+				.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+				.memoryBarrierCount = 1,
+				.pMemoryBarriers = &l_Barrier,
+			};
+
+			vkCmdPipelineBarrier2(commandBuffer, &l_Dependency);
+		}
+
+		// One bottom-level build waiting for the scratch buffer to be sized, the geometry is kept here because the build reads it again when it is recorded
+		struct PendingBuild
+		{
+			const VulkanAccelerationStructure* Structure = nullptr;
+			VkAccelerationStructureGeometryKHR Geometry{};
+			uint32_t PrimitiveCount = 0;
+			VkDeviceSize ScratchOffset = 0;
+		};
 	}
 
 	VulkanRenderer::VulkanRenderer() = default;
@@ -393,7 +521,7 @@ namespace Engine
 			return FailFrame(l_Frame, "preparing the render view", l_ViewResult);
 		}
 
-		// 5. Record and submit the view batch. No swapchain image is involved, so the GPU starts on it while the acquire below may still block
+		// 5. Record and submit the view batch. No swapchain image is involved, so the GPU starts on it while the acquire below may still block. It opens with the acceleration-structure builds when the slot's structures are older than the scene
 		const uint32_t l_ViewCommandBufferIndex = GetViewCommandBufferIndex(l_Frame.FrameSlot);
 		VkCommandBuffer l_ViewCommandBuffer = m_VulkanCommandPool->GetCommandBuffer(l_ViewCommandBufferIndex);
 
@@ -401,6 +529,12 @@ namespace Engine
 		if (l_ViewBeginResult != VK_SUCCESS)
 		{
 			return FailFrame(l_Frame, "beginning the view command buffer", l_ViewBeginResult);
+		}
+
+		const VkResult l_StructureResult = RecordAccelerationStructures(l_ViewCommandBuffer, l_Frame.FrameSlot, request);
+		if (l_StructureResult != VK_SUCCESS)
+		{
+			return FailFrame(l_Frame, "building the acceleration structures", l_StructureResult);
 		}
 
 		const VkResult l_ViewRecordResult = RecordViewFrame(l_ViewCommandBuffer, l_Frame.FrameSlot, request);
@@ -1451,32 +1585,38 @@ namespace Engine
 			}
 		}
 
-		// 2. Upload into this slot's buffers when they hold an older revision. WaitForFrame retired the slot's previous batches, so replacing or rewriting them cannot race the GPU. The mesh data rides with the revision too: Part B keys it on the assets and builds the BLAS from it once
+		// 2. Upload into this slot's buffers when they hold an older revision. WaitForFrame retired the slot's previous batches, so replacing or rewriting them cannot race the GPU. The mesh data still rides with the revision, the BLASes built from it do not, see RecordAccelerationStructures
 		FrameResources& l_Slot = m_FrameResources[frameSlot];
-		if (l_Slot.UploadedRevision == m_RenderScene.Revision && l_Slot.PrimitiveBuffer.IsInitialized() && l_Slot.MaterialBuffer.IsInitialized() && l_Slot.VertexBuffer.IsInitialized() && l_Slot.TriangleBuffer.IsInitialized())
+		if (l_Slot.UploadedRevision == m_RenderScene.Revision && l_Slot.PrimitiveBuffer.IsInitialized() && l_Slot.MaterialBuffer.IsInitialized() && l_Slot.VertexBuffer.IsInitialized() && l_Slot.TriangleBuffer.IsInitialized() && l_Slot.IndexBuffer.IsInitialized())
 		{
 			return VK_SUCCESS;
 		}
 
-		VkResult l_Result = UploadSceneBuffer(l_Slot.PrimitiveBuffer, m_RenderScene.Primitives.data(), m_RenderScene.Primitives.size() * sizeof(RenderPrimitiveRecord), sizeof(RenderPrimitiveRecord), "scene primitives");
+		VkResult l_Result = UploadSceneBuffer(l_Slot.PrimitiveBuffer, m_RenderScene.Primitives.data(), m_RenderScene.Primitives.size() * sizeof(RenderPrimitiveRecord), sizeof(RenderPrimitiveRecord), k_SceneBufferUsage, "scene primitives");
 		if (l_Result != VK_SUCCESS)
 		{
 			return l_Result;
 		}
 
-		l_Result = UploadSceneBuffer(l_Slot.MaterialBuffer, m_RenderScene.Materials.data(), m_RenderScene.Materials.size() * sizeof(RenderMaterialRecord), sizeof(RenderMaterialRecord), "scene materials");
+		l_Result = UploadSceneBuffer(l_Slot.MaterialBuffer, m_RenderScene.Materials.data(), m_RenderScene.Materials.size() * sizeof(RenderMaterialRecord), sizeof(RenderMaterialRecord), k_SceneBufferUsage, "scene materials");
 		if (l_Result != VK_SUCCESS)
 		{
 			return l_Result;
 		}
 
-		l_Result = UploadSceneBuffer(l_Slot.VertexBuffer, m_RenderScene.Vertices.data(), m_RenderScene.Vertices.size() * sizeof(RenderVertexRecord), sizeof(RenderVertexRecord), "scene vertices");
+		l_Result = UploadSceneBuffer(l_Slot.VertexBuffer, m_RenderScene.Vertices.data(), m_RenderScene.Vertices.size() * sizeof(RenderVertexRecord), sizeof(RenderVertexRecord), k_VertexBufferUsage, "scene vertices");
 		if (l_Result != VK_SUCCESS)
 		{
 			return l_Result;
 		}
 
-		l_Result = UploadSceneBuffer(l_Slot.TriangleBuffer, m_RenderScene.Triangles.data(), m_RenderScene.Triangles.size() * sizeof(RenderTriangleRecord), sizeof(RenderTriangleRecord), "scene triangles");
+		l_Result = UploadSceneBuffer(l_Slot.TriangleBuffer, m_RenderScene.Triangles.data(), m_RenderScene.Triangles.size() * sizeof(RenderTriangleRecord), sizeof(RenderTriangleRecord), k_SceneBufferUsage, "scene triangles");
+		if (l_Result != VK_SUCCESS)
+		{
+			return l_Result;
+		}
+
+		l_Result = UploadSceneBuffer(l_Slot.IndexBuffer, m_RenderScene.Indices.data(), m_RenderScene.Indices.size() * sizeof(uint32_t), 3 * sizeof(uint32_t), k_BuildInputBufferUsage, "scene indices");
 		if (l_Result != VK_SUCCESS)
 		{
 			return l_Result;
@@ -1487,7 +1627,7 @@ namespace Engine
 		return VK_SUCCESS;
 	}
 
-	VkResult VulkanRenderer::UploadSceneBuffer(VulkanBuffer& buffer, const void* data, VkDeviceSize size, VkDeviceSize minimumSize, const char* debugName)
+	VkResult VulkanRenderer::UploadSceneBuffer(VulkanBuffer& buffer, const void* data, VkDeviceSize size, VkDeviceSize minimumSize, VkBufferUsageFlags usage, const char* debugName)
 	{
 		// A bound storage buffer needs a non-zero size even for an empty scene, and growth allocates headroom so a run of additions does not recreate the buffer every frame
 		const VkDeviceSize l_Required = std::max(size, minimumSize);
@@ -1498,8 +1638,9 @@ namespace Engine
 			const VulkanBufferSpecification l_Specification
 			{
 				.Size = l_Required * 2,
-				.Usage = k_SceneBufferUsage,
+				.Usage = usage,
 				.Memory = BufferMemory::HostUpload,
+				.Alignment = k_SceneBufferAlignment,
 				.DebugName = debugName,
 			};
 
@@ -1518,6 +1659,269 @@ namespace Engine
 		return buffer.Upload(data, size);
 	}
 
+	VkResult VulkanRenderer::RecordAccelerationStructures(VkCommandBuffer commandBuffer, uint32_t frameSlot, const RenderRequest& request)
+	{
+		// Every scene revision rebuilds the slot's top level, the bottom levels only when the meshes change. PrepareSceneResources already uploaded this revision's buffers into the slot
+		FrameResources& l_Slot = m_FrameResources[frameSlot];
+		if (l_Slot.TopLevel.IsInitialized() && l_Slot.TopLevelRevision == m_RenderScene.Revision)
+		{
+			return VK_SUCCESS;
+		}
+
+		const VkPhysicalDeviceAccelerationStructurePropertiesKHR& l_Limits = m_VulkanDevice->GetAccelerationStructureProperties();
+		const VkDeviceSize l_ScratchAlignment = l_Limits.minAccelerationStructureScratchOffsetAlignment;
+
+		// Bottom-level builds run side by side, so each takes its own aligned stretch of the scratch buffer
+		std::vector<PendingBuild> l_BottomLevelBuilds;
+		VkDeviceSize l_BottomLevelScratch = 0;
+		const auto a_AddBuild = [&](const VulkanAccelerationStructure& structure, const VkAccelerationStructureGeometryKHR& geometry, uint32_t primitiveCount)
+		{
+			l_BottomLevelBuilds.push_back(PendingBuild{ .Structure = &structure, .Geometry = geometry, .PrimitiveCount = primitiveCount, .ScratchOffset = l_BottomLevelScratch });
+			l_BottomLevelScratch += AlignUp(structure.GetBuildScratchSize(), l_ScratchAlignment);
+		};
+
+		// 1. The unit sphere and quad boxes, once for the renderer's lifetime. The batch that builds them may belong to the other slot, the barrier before every top-level build covers that
+		if (!m_UnitShapeStructuresBuilt)
+		{
+			if (!m_UnitShapeBoundsBuffer.IsInitialized())
+			{
+				const VulkanBufferSpecification l_Specification
+				{
+					.Size = sizeof(k_UnitShapeBounds),
+					.Usage = k_BuildInputBufferUsage,
+					.Memory = BufferMemory::HostUpload,
+					.Alignment = k_SceneBufferAlignment,
+					.DebugName = "unit shape bounds",
+				};
+
+				VkResult l_Result = m_UnitShapeBoundsBuffer.Initialize(*m_VulkanMemoryAllocator, l_Specification);
+				if (l_Result != VK_SUCCESS)
+				{
+					return l_Result;
+				}
+
+				l_Result = m_UnitShapeBoundsBuffer.Upload(k_UnitShapeBounds.data(), sizeof(k_UnitShapeBounds));
+				if (l_Result != VK_SUCCESS)
+				{
+					return l_Result;
+				}
+			}
+
+			static constexpr std::array<const char*, 2> k_UnitShapeNames{ "unit sphere BLAS", "unit quad BLAS" };
+			for (size_t i_Shape = 0; i_Shape < m_UnitShapeStructures.size(); ++i_Shape)
+			{
+				const VkAccelerationStructureGeometryKHR l_Geometry = GetUnitShapeGeometry(m_UnitShapeBoundsBuffer.GetDeviceAddress() + i_Shape * sizeof(VkAabbPositionsKHR));
+				const uint32_t l_BoxCount = 1;
+
+				VulkanAccelerationStructure& l_Structure = m_UnitShapeStructures[i_Shape];
+				if (!l_Structure.IsInitialized())
+				{
+					const VulkanAccelerationStructureSpecification l_Specification
+					{
+						.Type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+						.Geometries = std::span(&l_Geometry, 1),
+						.MaxPrimitiveCounts = std::span(&l_BoxCount, 1),
+						.DebugName = k_UnitShapeNames[i_Shape],
+					};
+
+					const VkResult l_Result = l_Structure.Initialize(*m_VulkanDevice, *m_VulkanMemoryAllocator, l_Specification);
+					if (l_Result != VK_SUCCESS)
+					{
+						return l_Result;
+					}
+				}
+
+				a_AddBuild(l_Structure, l_Geometry, l_BoxCount);
+			}
+		}
+
+		// 2. One BLAS per mesh, rebuilt only when the list of meshes changes. Meshes are immutable, so the same Ids from the same manager are the same triangles, and a transform or material edit keeps them
+		std::vector<MeshId> l_MeshIds;
+		l_MeshIds.reserve(m_RenderScene.Meshes.size());
+		for (const RenderMeshRange& l_Mesh : m_RenderScene.Meshes)
+		{
+			l_MeshIds.push_back(l_Mesh.Id);
+		}
+
+		if (l_Slot.MeshStructureAssets != request.Assets || l_Slot.MeshStructureIds != l_MeshIds)
+		{
+			l_Slot.MeshStructures.clear();
+			l_Slot.MeshStructureIds.clear();
+			l_Slot.MeshStructureAssets = nullptr;
+
+			const uint32_t l_VertexCount = static_cast<uint32_t>(m_RenderScene.Vertices.size());
+			for (const RenderMeshRange& l_Mesh : m_RenderScene.Meshes)
+			{
+				if (l_Mesh.TriangleCount > l_Limits.maxPrimitiveCount)
+				{
+					PT_CORE_ERROR("Mesh {} has {} triangles, the device builds at most {} per BLAS", std::to_underlying(l_Mesh.Id), l_Mesh.TriangleCount, l_Limits.maxPrimitiveCount);
+
+					return VK_ERROR_FEATURE_NOT_PRESENT;
+				}
+
+				const VkAccelerationStructureGeometryKHR l_Geometry = GetMeshGeometry(l_Slot.VertexBuffer.GetDeviceAddress(), l_VertexCount, l_Slot.IndexBuffer.GetDeviceAddress(), l_Mesh);
+
+				const VulkanAccelerationStructureSpecification l_Specification
+				{
+					.Type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+					.Geometries = std::span(&l_Geometry, 1),
+					.MaxPrimitiveCounts = std::span(&l_Mesh.TriangleCount, 1),
+					.DebugName = "mesh BLAS",
+				};
+
+				std::unique_ptr<VulkanAccelerationStructure> l_Structure = std::make_unique<VulkanAccelerationStructure>();
+				const VkResult l_Result = l_Structure->Initialize(*m_VulkanDevice, *m_VulkanMemoryAllocator, l_Specification);
+				if (l_Result != VK_SUCCESS)
+				{
+					return l_Result;
+				}
+
+				a_AddBuild(*l_Structure, l_Geometry, l_Mesh.TriangleCount);
+				l_Slot.MeshStructures.push_back(std::move(l_Structure));
+			}
+
+			l_Slot.MeshStructureIds = std::move(l_MeshIds);
+			l_Slot.MeshStructureAssets = request.Assets;
+		}
+
+		// 3. One instance per primitive record: the record index as the custom index, which is how the shader will find the record again, the transform, and the BLAS it references
+		const size_t l_InstanceCount = m_RenderScene.Primitives.size();
+		if (l_InstanceCount > l_Limits.maxInstanceCount || l_InstanceCount > k_MaxInstanceCustomIndex + 1)
+		{
+			PT_CORE_ERROR("The scene has {} primitives, a top level holds at most {} instances here", l_InstanceCount, std::min<uint64_t>(l_Limits.maxInstanceCount, k_MaxInstanceCustomIndex + 1));
+
+			return VK_ERROR_FEATURE_NOT_PRESENT;
+		}
+
+		std::vector<VkAccelerationStructureInstanceKHR> l_Instances(l_InstanceCount);
+		for (size_t i_Primitive = 0; i_Primitive < l_InstanceCount; ++i_Primitive)
+		{
+			const RenderPrimitiveRecord& l_Record = m_RenderScene.Primitives[i_Primitive];
+			VkAccelerationStructureInstanceKHR& l_Instance = l_Instances[i_Primitive];
+
+			l_Instance.transform = ToInstanceTransform(l_Record.ObjectToWorld);
+			l_Instance.instanceCustomIndex = static_cast<uint32_t>(i_Primitive) & k_MaxInstanceCustomIndex; // In range by the check above, the mask only states the field width
+			l_Instance.mask = 0xFF;
+			l_Instance.instanceShaderBindingTableRecordOffset = 0;
+			l_Instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR; // Two-sided like the Part A triangle test
+
+			switch (static_cast<RenderPrimitiveType>(l_Record.Type))
+			{
+				case RenderPrimitiveType::Sphere:
+				case RenderPrimitiveType::Quad:
+				{
+					l_Instance.accelerationStructureReference = m_UnitShapeStructures[l_Record.Type].GetDeviceAddress();
+					break;
+				}
+				case RenderPrimitiveType::Mesh:
+				{
+					if (l_Record.MeshIndex >= l_Slot.MeshStructures.size())
+					{
+						PT_CORE_ERROR("Primitive {} references mesh index {}, the slot holds {} mesh structures", i_Primitive, l_Record.MeshIndex, l_Slot.MeshStructures.size());
+
+						return VK_ERROR_UNKNOWN;
+					}
+
+					l_Instance.accelerationStructureReference = l_Slot.MeshStructures[l_Record.MeshIndex]->GetDeviceAddress();
+					break;
+				}
+				default:
+				{
+					PT_CORE_ERROR("Primitive {} has unknown type {}", i_Primitive, l_Record.Type);
+
+					return VK_ERROR_UNKNOWN;
+				}
+			}
+		}
+
+		VkResult l_Result = UploadSceneBuffer(l_Slot.InstanceBuffer, l_Instances.data(), l_Instances.size() * sizeof(VkAccelerationStructureInstanceKHR), sizeof(VkAccelerationStructureInstanceKHR), k_BuildInputBufferUsage, "scene instances");
+		if (l_Result != VK_SUCCESS)
+		{
+			return l_Result;
+		}
+
+		// 4. The top level is sized with headroom and recreated only when the scene outgrows it, a smaller build fits a structure sized for more
+		const uint32_t l_InstanceCount32 = static_cast<uint32_t>(l_InstanceCount);
+		const VkAccelerationStructureGeometryKHR l_InstanceGeometry = GetInstanceGeometry(l_Slot.InstanceBuffer.GetDeviceAddress());
+		if (!l_Slot.TopLevel.IsInitialized() || l_InstanceCount32 > l_Slot.TopLevelCapacity)
+		{
+			l_Slot.TopLevel.Shutdown();
+
+			const uint32_t l_Capacity = static_cast<uint32_t>(std::min<uint64_t>(std::max<uint64_t>(l_InstanceCount, 1) * 2, std::min<uint64_t>(l_Limits.maxInstanceCount, k_MaxInstanceCustomIndex + 1)));
+
+			const VulkanAccelerationStructureSpecification l_Specification
+			{
+				.Type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+				.Geometries = std::span(&l_InstanceGeometry, 1),
+				.MaxPrimitiveCounts = std::span(&l_Capacity, 1),
+				.DebugName = "scene TLAS",
+			};
+
+			l_Result = l_Slot.TopLevel.Initialize(*m_VulkanDevice, *m_VulkanMemoryAllocator, l_Specification);
+			if (l_Result != VK_SUCCESS)
+			{
+				l_Slot.TopLevelCapacity = 0;
+
+				return l_Result;
+			}
+
+			l_Slot.TopLevelCapacity = l_Capacity;
+		}
+
+		// 5. One scratch buffer for the batch: the bottom levels side by side, then the top level from offset 0 once the barrier below has retired them
+		const VkDeviceSize l_RequiredScratch = std::max(l_BottomLevelScratch, AlignUp(l_Slot.TopLevel.GetBuildScratchSize(), l_ScratchAlignment));
+		if (!l_Slot.ScratchBuffer.IsInitialized() || l_Slot.ScratchBuffer.GetSize() < l_RequiredScratch)
+		{
+			l_Slot.ScratchBuffer.Shutdown();
+
+			const VulkanBufferSpecification l_Specification
+			{
+				.Size = l_RequiredScratch * 2,
+				.Usage = k_ScratchBufferUsage,
+				.Memory = BufferMemory::DeviceLocal,
+				.Alignment = std::max<VkDeviceSize>(l_ScratchAlignment, 1),
+				.DebugName = "acceleration structure scratch",
+			};
+
+			l_Result = l_Slot.ScratchBuffer.Initialize(*m_VulkanMemoryAllocator, l_Specification);
+			if (l_Result != VK_SUCCESS)
+			{
+				return l_Result;
+			}
+		}
+
+		const VkDeviceAddress l_ScratchAddress = l_Slot.ScratchBuffer.GetDeviceAddress();
+
+		// 6. The bottom levels, then a barrier so the top-level build reads finished bottom levels and may reuse their scratch
+		for (const PendingBuild& l_Build : l_BottomLevelBuilds)
+		{
+			l_Result = l_Build.Structure->RecordBuild(commandBuffer, std::span(&l_Build.Geometry, 1), std::span(&l_Build.PrimitiveCount, 1), l_ScratchAddress + l_Build.ScratchOffset);
+			if (l_Result != VK_SUCCESS)
+			{
+				return l_Result;
+			}
+		}
+
+		RecordBuildBarrier(commandBuffer, VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR);
+
+		// 7. The top level, then a barrier to the compute stage that will trace it in commit 3. Nothing reads it yet, the barrier is where the dependency will live
+		l_Result = l_Slot.TopLevel.RecordBuild(commandBuffer, std::span(&l_InstanceGeometry, 1), std::span(&l_InstanceCount32, 1), l_ScratchAddress);
+		if (l_Result != VK_SUCCESS)
+		{
+			return l_Result;
+		}
+
+		RecordBuildBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR);
+
+		// Anything that fails from here to the submit is fatal, so recording counts as built
+		m_UnitShapeStructuresBuilt = true;
+		l_Slot.TopLevelRevision = m_RenderScene.Revision;
+
+		PT_CORE_TRACE("Acceleration structures recorded for revision {} in slot {}: {} bottom-level builds, {} mesh BLAS kept, top level with {} of {} instances ({} bytes), {} scratch bytes", m_RenderScene.Revision, frameSlot, l_BottomLevelBuilds.size(), l_Slot.MeshStructures.size(), l_InstanceCount32, l_Slot.TopLevelCapacity, l_Slot.TopLevel.GetSize(), l_RequiredScratch);
+
+		return VK_SUCCESS;
+	}
+
 	void VulkanRenderer::DestroySceneResources()
 	{
 		for (FrameResources& l_FrameResources : m_FrameResources)
@@ -1526,9 +1930,28 @@ namespace Engine
 			l_FrameResources.MaterialBuffer.Shutdown();
 			l_FrameResources.VertexBuffer.Shutdown();
 			l_FrameResources.TriangleBuffer.Shutdown();
+			l_FrameResources.IndexBuffer.Shutdown();
 			l_FrameResources.PathtraceConstantBuffer.Shutdown();
 			l_FrameResources.UploadedRevision = 0;
+
+			// The top level goes first, it names the bottom levels by address
+			l_FrameResources.TopLevel.Shutdown();
+			l_FrameResources.TopLevelCapacity = 0;
+			l_FrameResources.TopLevelRevision = 0;
+			l_FrameResources.MeshStructures.clear();
+			l_FrameResources.MeshStructureIds.clear();
+			l_FrameResources.MeshStructureAssets = nullptr;
+			l_FrameResources.InstanceBuffer.Shutdown();
+			l_FrameResources.ScratchBuffer.Shutdown();
 		}
+
+		for (VulkanAccelerationStructure& l_Structure : m_UnitShapeStructures)
+		{
+			l_Structure.Shutdown();
+		}
+
+		m_UnitShapeBoundsBuffer.Shutdown();
+		m_UnitShapeStructuresBuilt = false;
 
 		m_RenderScene = RenderScene{};
 	}

@@ -24,6 +24,7 @@ namespace Engine
 		VkDeviceSize Size = 0;
 		VkBufferUsageFlags Usage = 0;
 		BufferMemory Memory = BufferMemory::DeviceLocal;
+		VkDeviceSize Alignment = 0;
 		const char* DebugName = "buffer";
 	};
 
@@ -47,6 +48,7 @@ namespace Engine
 		VkResult Upload(const void* data, VkDeviceSize size, VkDeviceSize offset = 0);
 
 		VkBuffer GetHandle() const { return m_Buffer; }
+		VkDeviceAddress GetDeviceAddress() const { return m_DeviceAddress; }
 		VkDeviceSize GetSize() const { return m_Specification.Size; }
 		const VulkanBufferSpecification& GetSpecification() const { return m_Specification; }
 		void* GetMappedPointer() const { return m_MappedPointer; }
@@ -57,6 +59,7 @@ namespace Engine
 
 		VkBuffer m_Buffer = VK_NULL_HANDLE;
 		VmaAllocation m_Allocation = VK_NULL_HANDLE;
+		VkDeviceAddress m_DeviceAddress = 0;
 		void* m_MappedPointer = nullptr;
 		bool m_HostCoherent = false;
 

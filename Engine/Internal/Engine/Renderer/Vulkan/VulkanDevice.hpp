@@ -37,10 +37,13 @@ namespace Engine
 		VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }
 		uint32_t GetGraphicsQueueFamilyIndex() const { return m_GraphicsQueueFamilyIndex; }
 
+		const VkPhysicalDeviceAccelerationStructurePropertiesKHR& GetAccelerationStructureProperties() const { return m_AccelerationStructureProperties; }
+
 	private:
 		void EnumeratePhysicalDevices(const VulkanInstance& instance, std::vector<VkPhysicalDevice>& devices);
 		void PickPhysicalDevice(const std::vector<VkPhysicalDevice>& devices, VkSurfaceKHR surface);
 		void CreateLogicalDevice();
+		void QueryDeviceProperties();
 
 		static bool IsDeviceSuitable(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties, VkSurfaceKHR surface, uint32_t& graphicsQueueFamilyIndex);
 		static uint64_t ScoreDevice(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties);
@@ -50,5 +53,6 @@ namespace Engine
 		VkDevice m_Device = VK_NULL_HANDLE;
 		VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
 		uint32_t m_GraphicsQueueFamilyIndex = UINT32_MAX;
+		VkPhysicalDeviceAccelerationStructurePropertiesKHR m_AccelerationStructureProperties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR };
 	};
 }

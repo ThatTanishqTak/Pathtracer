@@ -226,6 +226,8 @@ namespace Engine
 			return;
 		}
 
+		QueryDeviceProperties();
+
 		CreateLogicalDevice();
 		if (m_Device == VK_NULL_HANDLE)
 		{
@@ -263,6 +265,7 @@ namespace Engine
 
 		m_PhysicalDevice = VK_NULL_HANDLE;
 		m_GraphicsQueueFamilyIndex = UINT32_MAX;
+		m_AccelerationStructureProperties = VkPhysicalDeviceAccelerationStructurePropertiesKHR{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR };
 
 		PT_CORE_TRACE("Physical Device Released");
 
@@ -469,6 +472,25 @@ namespace Engine
 		}
 
 		PT_CORE_TRACE("Logical Device Created");
+	}
+
+	void VulkanDevice::QueryDeviceProperties()
+	{
+		// The selection gate guaranteed the extension, so the struct is valid in the chain
+		m_AccelerationStructureProperties = VkPhysicalDeviceAccelerationStructurePropertiesKHR{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR };
+
+		VkPhysicalDeviceProperties2 l_Properties
+		{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+			.pNext = &m_AccelerationStructureProperties,
+		};
+
+		vkGetPhysicalDeviceProperties2(m_PhysicalDevice, &l_Properties);
+
+		// The next pointer belongs to the query only, nothing should follow it after this call returns
+		m_AccelerationStructureProperties.pNext = nullptr;
+
+		PT_CORE_TRACE("Acceleration structures: scratch alignment {}, at most {} geometries, {} instances and {} primitives per build", m_AccelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment, m_AccelerationStructureProperties.maxGeometryCount, m_AccelerationStructureProperties.maxInstanceCount, m_AccelerationStructureProperties.maxPrimitiveCount);
 	}
 
 	bool VulkanDevice::IsDeviceSuitable(VkPhysicalDevice device, const VkPhysicalDeviceProperties& properties, VkSurfaceKHR surface, uint32_t& graphicsQueueFamilyIndex)

@@ -6,6 +6,7 @@
 
 #include "Engine/Renderer/Renderer.hpp"
 #include "Engine/Renderer/RenderScene.hpp"
+#include "Engine/Renderer/Vulkan/VulkanAccelerationStructure.hpp"
 #include "Engine/Renderer/Vulkan/VulkanBuffer.hpp"
 #include "Engine/Renderer/Vulkan/VulkanSynchronization.hpp"
 
@@ -14,9 +15,11 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace Engine
 {
+	class AssetManager;
 	class Window;
 	class VulkanInstance;
 	class VulkanSurface;
@@ -78,9 +81,20 @@ namespace Engine
 
 			VulkanBuffer PrimitiveBuffer;
 			VulkanBuffer MaterialBuffer;
-			VulkanBuffer VertexBuffer; // The meshes the primitives reference, indexed through each mesh record's triangle range
+			VulkanBuffer VertexBuffer; // The meshes the primitives reference, indexed through each mesh record's triangle range, and the BLAS builds' position input
 			VulkanBuffer TriangleBuffer;
+			VulkanBuffer IndexBuffer; // RenderScene::Indices, read only by the BLAS builds
 			uint64_t UploadedRevision = 0; // The RenderScene::Revision the buffers hold
+
+			// The slot's own acceleration structures, replaced only after WaitForFrame retired every batch that built or read them, so no retirement queue exists until Step 15 shares them between slots
+			std::vector<std::unique_ptr<VulkanAccelerationStructure>> MeshStructures; // One BLAS per RenderScene::Meshes entry, in the same order
+			std::vector<MeshId> MeshStructureIds; // The meshes MeshStructures were built from, a different list rebuilds them all
+			const AssetManager* MeshStructureAssets = nullptr; // The manager those Ids came from
+			VulkanAccelerationStructure TopLevel; // One instance per primitive record, rebuilt on every scene revision
+			uint32_t TopLevelCapacity = 0; // The instance count TopLevel was sized for, it is recreated only when a scene outgrows it
+			uint64_t TopLevelRevision = 0; // The RenderScene::Revision TopLevel was built from
+			VulkanBuffer InstanceBuffer; // The TLAS build input, one VkAccelerationStructureInstanceKHR per primitive record
+			VulkanBuffer ScratchBuffer; // Every build the slot records, the BLAS builds side by side and the TLAS after them from offset 0
 
 			VulkanBuffer PathtraceConstantBuffer; // Uniform block for Pathtrace.slang, rewritten every path-traced frame
 		};
@@ -112,7 +126,8 @@ namespace Engine
 		void DestroyRenderView();
 
 		VkResult PrepareSceneResources(const RenderRequest& request, uint32_t frameSlot);
-		VkResult UploadSceneBuffer(VulkanBuffer& buffer, const void* data, VkDeviceSize size, VkDeviceSize minimumSize, const char* debugName);
+		VkResult UploadSceneBuffer(VulkanBuffer& buffer, const void* data, VkDeviceSize size, VkDeviceSize minimumSize, VkBufferUsageFlags usage, const char* debugName);
+		VkResult RecordAccelerationStructures(VkCommandBuffer commandBuffer, uint32_t frameSlot, const RenderRequest& request);
 		void DestroySceneResources();
 
 		VkResult PrepareRenderView(const RenderRequest& request, uint32_t frameSlot, uint32_t& sampleCount);
@@ -138,6 +153,11 @@ namespace Engine
 		std::array<FrameResources, VulkanSynchronization::k_MaxFramesInFlight> m_FrameResources;
 
 		VkSampler m_DisplaySampler = VK_NULL_HANDLE; // Linear and clamped, for the display pass
+
+		// The unit sphere and the unit quad as one procedural box each, indexed by RenderPrimitiveType. Built once in the first view batch and never changed, every sphere and quad instance references one of them with its own transform
+		VulkanBuffer m_UnitShapeBoundsBuffer;
+		std::array<VulkanAccelerationStructure, 2> m_UnitShapeStructures;
+		bool m_UnitShapeStructuresBuilt = false;
 		RenderScene m_RenderScene; // The packed records of the last extracted revision, the client's Scene itself is never kept
 
 		bool m_VolkInitialized = false;

@@ -4,6 +4,7 @@
 #error "Engine internal header, not part of the public API"
 #endif
 
+#include "Engine/Assets/Mesh.hpp"
 #include "Engine/Math/Math.hpp"
 
 #include <array>
@@ -35,7 +36,7 @@ namespace Engine
 		uint32_t EntityIdHigh = 0;
 		uint32_t FirstTriangle = 0; // Mesh only: the range in RenderScene::Triangles, zero triangles for the analytic shapes
 		uint32_t TriangleCount = 0;
-		uint32_t Padding0 = 0;
+		uint32_t MeshIndex = 0; // Mesh only: index into RenderScene::Meshes, which BLAS the instance references. Still Padding0 in Modules/SceneRecords.slang, nothing on the GPU reads it
 		uint32_t Padding1 = 0;
 		std::array<float, 4> BoundsMin{}; // Mesh only: object-space bounds the shader tests before the triangle loop, w unused
 		std::array<float, 4> BoundsMax{};
@@ -50,6 +51,7 @@ namespace Engine
 	static_assert(offsetof(RenderPrimitiveRecord, EntityIdHigh) == 140, "EntityIdHigh must sit at std430 offset 140");
 	static_assert(offsetof(RenderPrimitiveRecord, FirstTriangle) == 144, "FirstTriangle must sit at std430 offset 144");
 	static_assert(offsetof(RenderPrimitiveRecord, TriangleCount) == 148, "TriangleCount must sit at std430 offset 148");
+	static_assert(offsetof(RenderPrimitiveRecord, MeshIndex) == 152, "MeshIndex must sit at std430 offset 152, the first padding word");
 	static_assert(offsetof(RenderPrimitiveRecord, BoundsMin) == 160, "BoundsMin must sit at std430 offset 160");
 	static_assert(offsetof(RenderPrimitiveRecord, BoundsMax) == 176, "BoundsMax must sit at std430 offset 176");
 
@@ -93,6 +95,14 @@ namespace Engine
 	static_assert(offsetof(RenderTriangleRecord, V0) == 0, "V0 must sit at std430 offset 0");
 	static_assert(offsetof(RenderTriangleRecord, V2) == 8, "V2 must sit at std430 offset 8");
 
+	// Where one mesh landed in the packed arrays, CPU side only: every entity that shares the mesh points at this range, and the renderer builds one BLAS per entry
+	struct RenderMeshRange
+	{
+		MeshId Id = MeshId::Invalid;
+		uint32_t FirstTriangle = 0; // Into RenderScene::Triangles, and times three into RenderScene::Indices
+		uint32_t TriangleCount = 0;
+	};
+
 	// The packed, upload-ready view of a Scene. Array positions are extraction details that change whenever the scene does, only the EntityIds inside the records are stable
 	struct RenderScene
 	{
@@ -100,6 +110,8 @@ namespace Engine
 		std::vector<RenderMaterialRecord> Materials; // Never empty after a build, index 0 is the fallback material
 		std::vector<RenderVertexRecord> Vertices; // Every mesh the primitives reference, appended once however many of them share it
 		std::vector<RenderTriangleRecord> Triangles;
+		std::vector<uint32_t> Indices; // The same triangles as three tightly packed indices each, the BLAS build input: a build cannot skip the triangle record's padding word
+		std::vector<RenderMeshRange> Meshes; // In the order the meshes were appended, RenderPrimitiveRecord::MeshIndex points here
 
 		Math::Vector3 EnvironmentRadiance{ 0.0f, 0.0f, 0.0f }; // Uploaded with the integrator constants, returned by every path that escapes the scene
 
