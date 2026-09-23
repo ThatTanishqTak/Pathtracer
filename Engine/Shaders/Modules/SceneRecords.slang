@@ -10,11 +10,11 @@ public struct PrimitiveRecord
     public uint MaterialIndex;
     public uint EntityIdLow;
     public uint EntityIdHigh;
-    public uint FirstTriangle; // Mesh only: the range in the triangle buffer, zero triangles for the analytic shapes
+    public uint FirstTriangle; // Mesh only: the range in the triangle buffer, where the BLAS's primitive indices start, zero triangles for the analytic shapes
     public uint TriangleCount;
-    public uint Padding0;
+    public uint MeshIndex; // Mesh only: which BLAS the instance references, the renderer's bookkeeping, unread here
     public uint Padding1;
-    public float4 BoundsMin; // Mesh only: object-space bounds tested before the triangle loop, w unused
+    public float4 BoundsMin; // Mesh only: object-space bounds, CPU picking tests them, the BLAS replaced them here
     public float4 BoundsMax;
 };
 

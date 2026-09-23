@@ -29,7 +29,7 @@ RWTexture2D<float4> u_Accumulation;
 [format("rgba32f")]
 RWTexture2D<float4> u_Output;
 
-// Bindings 2 and 3: the scene records the renderer extracted, PrimitiveCount and MaterialCount bound the reads
+// Bindings 2 and 3: the scene records the renderer extracted, MaterialCount bounds the material reads and the TLAS holds exactly the primitive records
 [[vk::binding(2, 0)]]
 StructuredBuffer<PrimitiveRecord> u_Primitives;
 
@@ -46,6 +46,10 @@ StructuredBuffer<VertexRecord> u_Vertices;
 
 [[vk::binding(6, 0)]]
 StructuredBuffer<TriangleRecord> u_Triangles;
+
+// Binding 7: the slot's TLAS, one instance per primitive record, built at the head of the same view batch
+[[vk::binding(7, 0)]]
+RaytracingAccelerationStructure u_Scene;
 
 // Must match k_PathtraceWorkgroupSize
 static const uint k_WorkgroupSize = 8;
@@ -65,7 +69,7 @@ float3 TracePath(Ray ray, inout RandomState random)
 	// The camera ray is segment 0, each bounce adds one segment
 	for (uint i_Segment = 0; i_Segment <= u_Parameters.MaxBounces; ++i_Segment)
     {
-        const Hit l_Hit = TraceClosest(ray, u_Primitives, u_Parameters.PrimitiveCount, u_Vertices, u_Triangles, i_Segment == 0 ? 0.0 : k_MinRayDistance, k_MaxRayDistance);
+        const Hit l_Hit = TraceClosest(ray, u_Scene, u_Primitives, u_Vertices, u_Triangles, i_Segment == 0 ? 0.0 : k_MinRayDistance, k_MaxRayDistance);
 		if (l_Hit.Distance < 0.0)
 		{
 			l_Radiance += l_Throughput * u_Parameters.EnvironmentRadiance.xyz;
@@ -101,7 +105,9 @@ float3 TracePath(Ray ray, inout RandomState random)
 	return l_Radiance;
 }
 
+// Ray queries are a capability past the build's spirv_1_6 profile, declared here so the entry point states it rather than slangc widening the profile on its own
 [shader("compute")]
+[require(spvRayQueryKHR)]
 [numthreads(k_WorkgroupSize, k_WorkgroupSize, 1)]
 void computeMain(uint3 threadId : SV_DispatchThreadID)
 {

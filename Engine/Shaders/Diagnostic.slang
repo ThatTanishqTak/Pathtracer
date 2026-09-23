@@ -30,7 +30,7 @@ static const float k_MaxDisplayDistance = 10.0;
 [format("rgba32f")]
 RWTexture2D<float4> u_Output;
 
-// Bindings 1 and 2: the scene records the renderer extracted, PrimitiveCount and MaterialCount bound the reads
+// Bindings 1 and 2: the scene records the renderer extracted, MaterialCount bounds the material reads and the TLAS holds exactly the primitive records
 [[vk::binding(1, 0)]]
 StructuredBuffer<PrimitiveRecord> u_Primitives;
 
@@ -43,6 +43,10 @@ StructuredBuffer<VertexRecord> u_Vertices;
 
 [[vk::binding(4, 0)]]
 StructuredBuffer<TriangleRecord> u_Triangles;
+
+// Binding 5: the slot's TLAS, one instance per primitive record, built at the head of the same view batch
+[[vk::binding(5, 0)]]
+RaytracingAccelerationStructure u_Scene;
 
 // One small block per dispatch, pushed straight into the command buffer
 [[vk::push_constant]]
@@ -57,9 +61,11 @@ float3 MissColor(float3 direction)
 	return direction.y >= 0.0 ? float3(0.25, 0.4, 0.7) : float3(0.15, 0.12, 0.1);
 }
 
+// Ray queries are a capability past the build's spirv_1_6 profile, declared here so the entry point states it rather than slangc widening the profile on its own
 [shader("compute")]
+[require(spvRayQueryKHR)]
 [numthreads(k_WorkgroupSize, k_WorkgroupSize, 1)]
-void computeMain(uint3 threadId : SV_DispatchThreadID)
+void computeMain(uint3 threadId: SV_DispatchThreadID)
 {
 	const uint2 l_Pixel = threadId.xy;
 	const uint2 l_Extent = u_Parameters.Extent;
@@ -81,7 +87,7 @@ void computeMain(uint3 threadId : SV_DispatchThreadID)
 	}
 	else if (l_Mode == k_ModeHit || l_Mode == k_ModeNormal || l_Mode == k_ModeDistance || l_Mode == k_ModeBaseColor)
     {
-        const Hit l_Hit = TraceClosest(l_Ray, u_Primitives, u_Parameters.PrimitiveCount, u_Vertices, u_Triangles, 0.0, k_MaxRayDistance);
+        const Hit l_Hit = TraceClosest(l_Ray, u_Scene, u_Primitives, u_Vertices, u_Triangles, 0.0, k_MaxRayDistance);
 		if (l_Hit.Distance < 0.0)
 		{
 			l_Color = l_Mode == k_ModeHit ? MissColor(l_Ray.Direction) : float3(0.0, 0.0, 0.0);

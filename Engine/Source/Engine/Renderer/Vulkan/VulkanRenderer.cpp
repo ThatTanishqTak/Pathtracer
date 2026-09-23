@@ -816,6 +816,15 @@ namespace Engine
 			.range = VK_WHOLE_SIZE,
 		};
 
+		// The TLAS RecordAccelerationStructures built or kept for this slot at the head of this batch, readable at the compute stage through the barrier after its build
+		const VkAccelerationStructureKHR l_TopLevel = l_Slot.TopLevel.GetHandle();
+		const VkWriteDescriptorSetAccelerationStructureKHR l_TopLevelInfo
+		{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+			.accelerationStructureCount = 1,
+			.pAccelerationStructures = &l_TopLevel,
+		};
+
 		if (request.View.Mode == DiagnosticMode::PathTraced)
 		{
 			VulkanImage& l_Accumulation = m_RenderView->GetAccumulationImage();
@@ -836,7 +845,7 @@ namespace Engine
 				.range = sizeof(PathtraceParameters),
 			};
 
-			const std::array<VkWriteDescriptorSet, 7> l_DescriptorWrites
+			const std::array<VkWriteDescriptorSet, 8> l_DescriptorWrites
 			{ {
 				{
 					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -887,6 +896,13 @@ namespace Engine
 					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 					.pBufferInfo = &l_TriangleBufferInfo,
 				},
+				{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.pNext = &l_TopLevelInfo,
+					.dstBinding = 7,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+				},
 			} };
 
 			m_PathtracePipeline->Bind(commandBuffer);
@@ -911,7 +927,7 @@ namespace Engine
 				.Padding2 = 0,
 			};
 
-			const std::array<VkWriteDescriptorSet, 5> l_DescriptorWrites
+			const std::array<VkWriteDescriptorSet, 6> l_DescriptorWrites
 			{ {
 				{
 					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -947,6 +963,13 @@ namespace Engine
 					.descriptorCount = 1,
 					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 					.pBufferInfo = &l_TriangleBufferInfo,
+				},
+				{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.pNext = &l_TopLevelInfo,
+					.dstBinding = 5,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
 				},
 			} };
 
@@ -1184,7 +1207,7 @@ namespace Engine
 			return l_Result;
 		}
 
-		const std::array<VkDescriptorSetLayoutBinding, 5> l_Bindings
+		const std::array<VkDescriptorSetLayoutBinding, 6> l_Bindings
 		{ {
 			{
 				.binding = 0,
@@ -1213,6 +1236,12 @@ namespace Engine
 			{
 				.binding = 4,
 				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+			},
+			{
+				.binding = 5,
+				.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
 				.descriptorCount = 1,
 				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 			},
@@ -1274,7 +1303,7 @@ namespace Engine
 			return l_Result;
 		}
 
-		const std::array<VkDescriptorSetLayoutBinding, 7> l_Bindings
+		const std::array<VkDescriptorSetLayoutBinding, 8> l_Bindings
 		{ {
 			{
 				.binding = 0,
@@ -1315,6 +1344,12 @@ namespace Engine
 			{
 				.binding = 6,
 				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+			},
+			{
+				.binding = 7,
+				.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
 				.descriptorCount = 1,
 				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 			},
@@ -1904,7 +1939,7 @@ namespace Engine
 
 		RecordBuildBarrier(commandBuffer, VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR);
 
-		// 7. The top level, then a barrier to the compute stage that will trace it in commit 3. Nothing reads it yet, the barrier is where the dependency will live
+		// 7. The top level, then a barrier to the compute stage that traces it, in this batch and in every later one that keeps it
 		l_Result = l_Slot.TopLevel.RecordBuild(commandBuffer, std::span(&l_InstanceGeometry, 1), std::span(&l_InstanceCount32, 1), l_ScratchAddress);
 		if (l_Result != VK_SUCCESS)
 		{

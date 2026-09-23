@@ -10,13 +10,13 @@ namespace Engine
 {
 	namespace
 	{
-		// Negative distances mean a miss everywhere below, as in Modules/Intersection.slang
+		// Negative distances mean a miss everywhere below, as in Modules/Intersection.slang for the unit shapes
 		constexpr float k_Miss = -1.0f;
 
 		// The same limit BuildRenderScene rejects at, so a click can only pick what the image shows
 		constexpr float k_MinimumScale = 1e-6f;
 
-		// A direction component below this runs parallel to the slab, and a determinant below it a ray parallel to the triangle's plane. Both match the shader
+		// A direction component below this runs parallel to the slab, and a determinant below it a ray parallel to the triangle's plane. The unit shapes match the shader, the triangles are the hardware's on the GPU
 		constexpr float k_ParallelEpsilon = 1e-12f;
 
 		// Nothing in a scene is this far away, the same far limit the shader's primary rays use
@@ -38,7 +38,7 @@ namespace Engine
 			return true;
 		}
 
-		// The closest triangle of one mesh along an object-space ray, the CPU twin of the mesh branch in TraceClosest. Only triangles nearer than maxDistance count, so the bounds test and the loop prune against the best hit so far
+		// The closest triangle of one mesh along an object-space ray, what the mesh BLAS answers on the GPU. Only triangles nearer than maxDistance count, so the bounds test and the loop prune against the best hit so far
 		float IntersectMesh(const Mesh& mesh, const Math::Vector3& origin, const Math::Vector3& direction, float minDistance, float maxDistance)
 		{
 			if (!IntersectBounds(origin, direction, mesh.Bounds.Min, mesh.Bounds.Max, minDistance, maxDistance))
@@ -150,7 +150,7 @@ namespace Engine
 
 	float IntersectTriangle(const Math::Vector3& origin, const Math::Vector3& direction, const Math::Vector3& p0, const Math::Vector3& p1, const Math::Vector3& p2, float minDistance, Math::Vector2& barycentrics)
 	{
-		// Möller-Trumbore, the same steps in the same order as the shader so both sides agree on the edge cases
+		// Möller-Trumbore, the Part A shader's steps in the same order. The GPU's hardware test is watertight, so the two may differ only exactly on an edge
 		barycentrics = Math::Vector2(0.0f, 0.0f);
 
 		const Math::Vector3 l_Edge1 = p1 - p0;

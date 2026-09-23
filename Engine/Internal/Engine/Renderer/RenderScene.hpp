@@ -36,9 +36,9 @@ namespace Engine
 		uint32_t EntityIdHigh = 0;
 		uint32_t FirstTriangle = 0; // Mesh only: the range in RenderScene::Triangles, zero triangles for the analytic shapes
 		uint32_t TriangleCount = 0;
-		uint32_t MeshIndex = 0; // Mesh only: index into RenderScene::Meshes, which BLAS the instance references. Still Padding0 in Modules/SceneRecords.slang, nothing on the GPU reads it
+		uint32_t MeshIndex = 0; // Mesh only: index into RenderScene::Meshes, which BLAS the instance references. The shader declares it and never reads it
 		uint32_t Padding1 = 0;
-		std::array<float, 4> BoundsMin{}; // Mesh only: object-space bounds the shader tests before the triangle loop, w unused
+		std::array<float, 4> BoundsMin{}; // Mesh only: object-space bounds, w unused. The BLAS replaced them on the GPU, the record keeps its layout
 		std::array<float, 4> BoundsMax{};
 	};
 

@@ -29,6 +29,6 @@ namespace Engine
 	// Distance beyond minDistance to one triangle, both sides count, negative on a miss. On a hit, barycentrics holds the weights of the second and third vertex, the first vertex takes the rest
 	float IntersectTriangle(const Math::Vector3& origin, const Math::Vector3& direction, const Math::Vector3& p0, const Math::Vector3& p1, const Math::Vector3& p2, float minDistance, Math::Vector2& barycentrics);
 
-	// The closest entity the renderer would draw: visible, with geometry and a usable transform, intersected in object space through the same matrices BuildRenderScene uploads. Mesh entities are resolved through the assets, and skipped when they are null. A brute-force loop over every entity and, inside a mesh's bounds, every triangle, until Part B adds acceleration
+	// The closest entity the renderer would draw: visible, with geometry and a usable transform, intersected in object space through the same matrices BuildRenderScene uploads. Mesh entities are resolved through the assets, and skipped when they are null. A brute-force loop over every entity and, inside a mesh's bounds, every triangle. The GPU traverses a TLAS since Step 13 Part B and the hardware's triangle test is watertight, so the two can disagree only on the shared edge of two triangles, never on which object a pixel mostly shows
 	ScenePick PickClosest(const Scene& scene, const AssetManager* assets, const Ray& ray);
 }

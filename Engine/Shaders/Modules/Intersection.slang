@@ -1,4 +1,4 @@
-// Analytic intersection against the unit shapes in object space, triangle intersection against the uploaded meshes, and the closest-hit loop over the records
+// Analytic intersection against the unit shapes in object space, and the closest hit through the scene's TLAS with the mesh normals interpolated at it
 module Intersection;
 
 import Camera;
@@ -13,7 +13,7 @@ public static const float k_MinRayDistance = 1e-4;
 // Nothing in a scene is this far away, a primary ray can pass it as its far limit
 public static const float k_MaxRayDistance = 1e30;
 
-// A direction component below this runs parallel to a slab, a determinant below it a ray parallel to a triangle's plane. Must match ScenePicking.cpp
+// Interpolated vertex normals shorter than this have cancelled out, the face normal stands in
 static const float k_ParallelEpsilon = 1e-12;
 
 public struct Hit
@@ -73,175 +73,97 @@ public float IntersectUnitQuad(float3 origin, float3 direction, float minDistanc
 	return l_Distance;
 }
 
-// Whether the ray overlaps an axis-aligned box somewhere inside (minDistance, maxDistance), the CPU twin is IntersectBounds in ScenePicking.cpp. Each pair of slabs narrows the overlap, a component parallel to its slabs tests the origin instead of dividing by zero
-public bool IntersectBounds(float3 origin, float3 direction, float3 boundsMin, float3 boundsMax, float minDistance, float maxDistance)
+// The shading normal of one mesh triangle at a hit, in object space, from the barycentric weights of its second and third vertex. Where the vertex normals cancel, a hard edge with opposing normals, the face's own normal stands in. The extraction validated every index
+float3 InterpolateMeshNormal(TriangleRecord triangle, StructuredBuffer<VertexRecord> vertices, float2 barycentrics)
 {
-	float l_Enter = minDistance;
-	float l_Exit = maxDistance;
+    const VertexRecord l_V0 = vertices[triangle.V0];
+    const VertexRecord l_V1 = vertices[triangle.V1];
+    const VertexRecord l_V2 = vertices[triangle.V2];
 
-	for (int i_Axis = 0; i_Axis < 3; ++i_Axis)
-	{
-		if (abs(direction[i_Axis]) < k_ParallelEpsilon)
-		{
-			if (origin[i_Axis] < boundsMin[i_Axis] || origin[i_Axis] > boundsMax[i_Axis])
-			{
-				return false;
-			}
+    float3 l_Normal = l_V0.NormalV.xyz * (1.0 - barycentrics.x - barycentrics.y) + l_V1.NormalV.xyz * barycentrics.x + l_V2.NormalV.xyz * barycentrics.y;
+    if (dot(l_Normal, l_Normal) < k_ParallelEpsilon)
+    {
+        l_Normal = cross(l_V1.PositionU.xyz - l_V0.PositionU.xyz, l_V2.PositionU.xyz - l_V0.PositionU.xyz);
+    }
 
-			continue;
-		}
-
-		const float l_Inverse = 1.0 / direction[i_Axis];
-		const float l_First = (boundsMin[i_Axis] - origin[i_Axis]) * l_Inverse;
-		const float l_Second = (boundsMax[i_Axis] - origin[i_Axis]) * l_Inverse;
-
-		l_Enter = max(l_Enter, min(l_First, l_Second));
-		l_Exit = min(l_Exit, max(l_First, l_Second));
-		if (l_Enter > l_Exit)
-		{
-			return false;
-		}
-	}
-
-	return true;
+    return l_Normal;
 }
 
-// Möller-Trumbore against one object-space triangle, both sides count, the CPU twin is IntersectTriangle in ScenePicking.cpp. Returns the distance beyond minDistance or k_Miss, and on a hit the barycentric weights of the second and third vertex
-public float IntersectTriangle(float3 origin, float3 direction, float3 p0, float3 p1, float3 p2, float minDistance, out float2 barycentrics)
+// Closest primitive along the ray inside (minDistance, maxDistance), traversed through the scene's TLAS. Mesh triangles are opaque and committed by the hardware; a sphere or quad is a procedural box whose candidates run the unit-shape intersector in the record's object space. The instance's custom index is the record index
+public Hit TraceClosest(Ray ray, RaytracingAccelerationStructure scene, StructuredBuffer<PrimitiveRecord> primitives, StructuredBuffer<VertexRecord> vertices, StructuredBuffer<TriangleRecord> triangles, float minDistance, float maxDistance)
 {
-	barycentrics = float2(0.0, 0.0);
+    Hit l_Hit;
+    l_Hit.Distance = k_Miss;
+    l_Hit.Position = ray.Origin;
+    l_Hit.Normal = float3(0.0, 0.0, 0.0);
+    l_Hit.MaterialIndex = 0;
 
-	const float3 l_Edge1 = p1 - p0;
-	const float3 l_Edge2 = p2 - p0;
-	const float3 l_P = cross(direction, l_Edge2);
-	const float l_Determinant = dot(l_Edge1, l_P);
-	if (abs(l_Determinant) < k_ParallelEpsilon)
-	{
-		return k_Miss;
-	}
+    RayDesc l_Ray;
+    l_Ray.Origin = ray.Origin;
+    l_Ray.Direction = ray.Direction;
+    l_Ray.TMin = minDistance;
+    l_Ray.TMax = maxDistance;
 
-	const float l_InverseDeterminant = 1.0 / l_Determinant;
-	const float3 l_T = origin - p0;
-	const float l_U = dot(l_T, l_P) * l_InverseDeterminant;
-	if (l_U < 0.0 || l_U > 1.0)
-	{
-		return k_Miss;
-	}
+    RayQuery<RAY_FLAG_NONE> l_Query;
+    l_Query.TraceRayInline(scene, RAY_FLAG_NONE, 0xFF, l_Ray);
 
-	const float3 l_Q = cross(l_T, l_Edge1);
-	const float l_V = dot(direction, l_Q) * l_InverseDeterminant;
-	if (l_V < 0.0 || l_U + l_V > 1.0)
-	{
-		return k_Miss;
-	}
+    while (l_Query.Proceed())
+    {
+        if (l_Query.CandidateType() == CANDIDATE_PROCEDURAL_PRIMITIVE)
+        {
+            // The same transform the record loop used: the direction is not normalized, so the object-space distance is the world-space one the query compares
+            const PrimitiveRecord l_Record = primitives[l_Query.CandidateInstanceID()];
+            const float3 l_Origin = TransformPoint(l_Record, ray.Origin);
+            const float3 l_Direction = TransformDirection(l_Record, ray.Direction);
 
-	const float l_Distance = dot(l_Edge2, l_Q) * l_InverseDeterminant;
-	if (l_Distance <= minDistance)
-	{
-		return k_Miss;
-	}
+            const float l_Distance = l_Record.Type == k_PrimitiveSphere ? IntersectUnitSphere(l_Origin, l_Direction, minDistance) : IntersectUnitQuad(l_Origin, l_Direction, minDistance);
 
-	barycentrics = float2(l_U, l_V);
+            // Only a hit nearer than the one committed so far replaces it, CommittedRayT is TMax until something commits
+            if (l_Distance > 0.0 && l_Distance < l_Query.CommittedRayT())
+            {
+                l_Query.CommitProceduralPrimitiveHit(l_Distance);
+            }
+        }
+        else
+        {
+            // Every triangle geometry is built opaque, so this never runs; committing keeps the result right if a geometry ever loses the flag
+            l_Query.CommitNonOpaqueTriangleHit();
+        }
+    }
 
-	return l_Distance;
-}
+    const uint l_Status = l_Query.CommittedStatus();
+    if (l_Status == COMMITTED_NOTHING)
+    {
+        return l_Hit;
+    }
 
-// The closest triangle of one mesh record along an object-space ray, with the object-space shading normal at the hit. The full triangle loop of the prototype, Part B traces the TLAS instead. Only hits nearer than maxDistance count, so the bounds test and the loop prune against the best hit so far. The extraction validated every index
-float IntersectMesh(PrimitiveRecord record, float3 origin, float3 direction, StructuredBuffer<VertexRecord> vertices, StructuredBuffer<TriangleRecord> triangles, float minDistance, float maxDistance, out float3 objectNormal)
-{
-	objectNormal = float3(0.0, 0.0, 1.0);
+    const PrimitiveRecord l_Record = primitives[l_Query.CommittedInstanceID()];
+    const float l_Distance = l_Query.CommittedRayT();
 
-	if (!IntersectBounds(origin, direction, record.BoundsMin.xyz, record.BoundsMax.xyz, minDistance, maxDistance))
-	{
-		return k_Miss;
-	}
+    float3 l_ObjectNormal = float3(0.0, 0.0, 1.0);
+    if (l_Status == COMMITTED_TRIANGLE_HIT)
+    {
+        // The BLAS geometry starts at the mesh's first triangle, so the primitive index counts from there
+        const TriangleRecord l_Triangle = triangles[l_Record.FirstTriangle + l_Query.CommittedPrimitiveIndex()];
+        l_ObjectNormal = InterpolateMeshNormal(l_Triangle, vertices, l_Query.CommittedTriangleBarycentrics());
+    }
+    else if (l_Record.Type == k_PrimitiveSphere)
+    {
+        l_ObjectNormal = TransformPoint(l_Record, ray.Origin) + TransformDirection(l_Record, ray.Direction) * l_Distance;
+    }
 
-	float l_Closest = k_Miss;
-	float l_Limit = maxDistance;
+    l_Hit.Distance = l_Distance;
+    l_Hit.Position = ray.Origin + ray.Direction * l_Distance;
+    l_Hit.Normal = normalize(TransformNormal(l_Record, l_ObjectNormal));
+    l_Hit.MaterialIndex = l_Record.MaterialIndex;
 
-	for (uint i_Triangle = 0; i_Triangle < record.TriangleCount; ++i_Triangle)
-	{
-		const TriangleRecord l_Triangle = triangles[record.FirstTriangle + i_Triangle];
-		const VertexRecord l_V0 = vertices[l_Triangle.V0];
-		const VertexRecord l_V1 = vertices[l_Triangle.V1];
-		const VertexRecord l_V2 = vertices[l_Triangle.V2];
+    // Two-sided: the normal always faces the incoming ray
+    if (dot(l_Hit.Normal, ray.Direction) > 0.0)
+    {
+        l_Hit.Normal = -l_Hit.Normal;
+    }
 
-		float2 l_Barycentrics;
-		const float l_Distance = IntersectTriangle(origin, direction, l_V0.PositionU.xyz, l_V1.PositionU.xyz, l_V2.PositionU.xyz, minDistance, l_Barycentrics);
-		if (l_Distance > 0.0 && l_Distance < l_Limit)
-		{
-			l_Closest = l_Distance;
-			l_Limit = l_Distance;
-
-			// The shading normal from the vertex normals. Where they cancel, a hard edge with opposing normals, the face's own normal stands in
-			float3 l_Normal = l_V0.NormalV.xyz * (1.0 - l_Barycentrics.x - l_Barycentrics.y) + l_V1.NormalV.xyz * l_Barycentrics.x + l_V2.NormalV.xyz * l_Barycentrics.y;
-			if (dot(l_Normal, l_Normal) < k_ParallelEpsilon)
-			{
-				l_Normal = cross(l_V1.PositionU.xyz - l_V0.PositionU.xyz, l_V2.PositionU.xyz - l_V0.PositionU.xyz);
-			}
-
-			objectNormal = l_Normal;
-		}
-	}
-
-	return l_Closest;
-}
-
-// Closest primitive along the ray inside (minDistance, maxDistance), a brute-force loop over every record and, inside a mesh's bounds, every triangle, until Part B adds acceleration
-public Hit TraceClosest(Ray ray, StructuredBuffer<PrimitiveRecord> primitives, uint primitiveCount, StructuredBuffer<VertexRecord> vertices, StructuredBuffer<TriangleRecord> triangles, float minDistance, float maxDistance)
-{
-	Hit l_Hit;
-	l_Hit.Distance = k_Miss;
-	l_Hit.Position = ray.Origin;
-	l_Hit.Normal = float3(0.0, 0.0, 0.0);
-	l_Hit.MaterialIndex = 0;
-
-	for (uint i_Primitive = 0; i_Primitive < primitiveCount; ++i_Primitive)
-	{
-		const PrimitiveRecord l_Record = primitives[i_Primitive];
-
-		const float3 l_Origin = TransformPoint(l_Record, ray.Origin);
-		const float3 l_Direction = TransformDirection(l_Record, ray.Direction);
-
-		// Only a hit nearer than the best so far can replace it, and the mesh loop prunes against that limit
-		const float l_Limit = l_Hit.Distance > 0.0 ? l_Hit.Distance : maxDistance;
-
-		float l_Distance = k_Miss;
-		float3 l_ObjectNormal = float3(0.0, 0.0, 1.0);
-		if (l_Record.Type == k_PrimitiveSphere)
-		{
-			l_Distance = IntersectUnitSphere(l_Origin, l_Direction, minDistance);
-			l_ObjectNormal = l_Origin + l_Direction * l_Distance;
-		}
-		else if (l_Record.Type == k_PrimitiveQuad)
-		{
-			l_Distance = IntersectUnitQuad(l_Origin, l_Direction, minDistance);
-		}
-		else if (l_Record.Type == k_PrimitiveMesh)
-		{
-			l_Distance = IntersectMesh(l_Record, l_Origin, l_Direction, vertices, triangles, minDistance, l_Limit, l_ObjectNormal);
-		}
-
-		if (l_Distance > 0.0 && l_Distance < l_Limit)
-		{
-			l_Hit.Distance = l_Distance;
-			l_Hit.Normal = normalize(TransformNormal(l_Record, l_ObjectNormal));
-			l_Hit.MaterialIndex = l_Record.MaterialIndex;
-		}
-	}
-
-	if (l_Hit.Distance > 0.0)
-	{
-		l_Hit.Position = ray.Origin + ray.Direction * l_Hit.Distance;
-
-		// Two-sided: the normal always faces the incoming ray
-		if (dot(l_Hit.Normal, ray.Direction) > 0.0)
-		{
-			l_Hit.Normal = -l_Hit.Normal;
-		}
-	}
-
-	return l_Hit;
+    return l_Hit;
 }
 
 // Secondary rays start a little off the surface along the face-forward normal, scaled with the magnitude of the position so far-away surfaces get a proportionally larger step
