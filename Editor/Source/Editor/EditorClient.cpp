@@ -29,6 +29,8 @@ namespace Editor
 
 		constexpr const char* k_SceneFilterName = "Scene files";
 		constexpr const char* k_SceneFilterPattern = "json";
+		constexpr const char* k_MeshFilterName = "glTF files";
+		constexpr const char* k_MeshFilterPattern = "gltf;glb";
 
 		// Built next to the Editor: both executables share the output directory with Shaders/ and Assets/
 #ifdef _WIN32
@@ -569,7 +571,14 @@ namespace Editor
 
 		if (l_Result->Kind == Engine::FileDialogKind::Open)
 		{
-			LoadScene(l_Result->Path);
+			if (m_OpenDialogPurpose == OpenDialogPurpose::MeshImport)
+			{
+				ImportMeshFrom(l_Result->Path);
+			}
+			else
+			{
+				LoadScene(l_Result->Path);
+			}
 
 			return;
 		}
@@ -715,7 +724,92 @@ namespace Editor
 		{
 			PT_APP_WARN("Cannot show the open dialog, another dialog is still open");
 			m_PendingAction = PendingAction::None;
+
+			return;
 		}
+
+		m_OpenDialogPurpose = OpenDialogPurpose::Scene;
+	}
+
+	void EditorClient::ImportMesh()
+	{
+		// Starts in the mesh folder when there is one, the asset root otherwise. The poll imports what the dialog picked
+		Engine::FileDialogRequest l_Request;
+		l_Request.Kind = Engine::FileDialogKind::Open;
+		l_Request.FilterName = k_MeshFilterName;
+		l_Request.FilterPattern = k_MeshFilterPattern;
+
+		std::error_code l_Error;
+		const std::filesystem::path l_Meshes = m_AssetRoot / "Meshes";
+		l_Request.DefaultLocation = std::filesystem::is_directory(l_Meshes, l_Error) ? l_Meshes : m_AssetRoot;
+
+		if (!m_Services->ShowFileDialog(l_Request))
+		{
+			PT_APP_WARN("Cannot show the import dialog, another dialog is still open");
+
+			return;
+		}
+
+		m_OpenDialogPurpose = OpenDialogPurpose::MeshImport;
+	}
+
+	void EditorClient::ImportMeshFrom(const std::filesystem::path& path)
+	{
+		// Under the asset root the source is the relative path, so the scene travels with the Assets folder and the Sandbox resolves it against the same root. Outside it the absolute path is stored and the status says so
+		std::error_code l_Error;
+		std::filesystem::path l_Absolute = std::filesystem::absolute(path, l_Error);
+		if (l_Error)
+		{
+			l_Absolute = path;
+		}
+
+		l_Absolute = l_Absolute.lexically_normal();
+
+		const std::filesystem::path l_Relative = l_Absolute.lexically_relative(m_AssetRoot.lexically_normal());
+		const bool l_Inside = !l_Relative.empty() && *l_Relative.begin() != "..";
+
+		const std::u8string l_Utf8 = (l_Inside ? l_Relative : l_Absolute).generic_u8string();
+		const std::string l_Source(l_Utf8.begin(), l_Utf8.end());
+
+		std::string l_ImportError;
+		const Engine::MeshId l_MeshId = m_Assets.LoadMesh(l_Source, &l_ImportError);
+		if (l_MeshId == Engine::MeshId::Invalid)
+		{
+			Engine::SceneFileResult l_Failure;
+			l_Failure.Error = l_ImportError;
+			SetFileStatus(std::format("Could not import {}", l_Source), l_Failure);
+
+			PT_APP_ERROR("Mesh import failed for {}: {}", l_Source, l_ImportError);
+
+			return;
+		}
+
+		// The same file imported twice is one mesh shared by two entities, the manager keyed it on the source
+		const Engine::Mesh* l_Mesh = m_Assets.FindMesh(l_MeshId);
+
+		m_CreatedEntities += 1;
+
+		Engine::Entity l_Entity;
+		l_Entity.Name = std::format("{} {}", l_Mesh->Name, m_CreatedEntities);
+		l_Entity.Geometry.Type = Engine::GeometryType::Mesh;
+		l_Entity.Geometry.Mesh = l_MeshId;
+		l_Entity.Transform.Translation = GetCreatePosition();
+
+		Engine::Material l_Material;
+		l_Material.BaseColor = k_Palette[m_CreatedEntities % k_Palette.size()];
+
+		ExecuteCreate(std::move(l_Entity), std::move(l_Material));
+
+		Engine::SceneFileResult l_Success;
+		l_Success.Succeeded = true;
+		if (!l_Inside)
+		{
+			l_Success.Warnings.push_back(std::format("{} is outside the asset root {}, the scene will store its absolute path and not travel with the Assets folder", l_Source, m_AssetRoot.string()));
+		}
+
+		SetFileStatus(std::format("Imported {}: {} vertices, {} triangles", l_Source, l_Mesh->Vertices.size(), l_Mesh->GetTriangleCount()), l_Success);
+
+		PT_APP_INFO("Imported mesh '{}' from {}: {} vertices, {} triangles{}", l_Mesh->Name, l_Source, l_Mesh->Vertices.size(), l_Mesh->GetTriangleCount(), l_Inside ? "" : ", outside the asset root");
 	}
 
 	void EditorClient::ShowSaveAsDialog()
@@ -956,9 +1050,15 @@ namespace Editor
 			}
 		}
 
-		l_Material.Name = std::format("{} material", l_Entity.Name);
+		ExecuteCreate(std::move(l_Entity), std::move(l_Material));
+	}
 
-		auto l_Command = std::make_unique<CreateEntityCommand>(std::format("Create '{}'", l_Entity.Name), std::move(l_Entity), std::move(l_Material));
+	void EditorClient::ExecuteCreate(Engine::Entity entity, Engine::Material material)
+	{
+		// One command creates the entity and its material together, and the new entity is selected so the Inspector shows it
+		material.Name = std::format("{} material", entity.Name);
+
+		auto l_Command = std::make_unique<CreateEntityCommand>(std::format("Create '{}'", entity.Name), std::move(entity), std::move(material));
 		const CreateEntityCommand* l_Created = l_Command.get();
 
 		m_History.Execute(std::move(l_Command), m_Scene);

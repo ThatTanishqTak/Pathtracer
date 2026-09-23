@@ -40,6 +40,13 @@ namespace Editor
 
 		ImGui::Separator();
 
+		if (ImGui::MenuItem("Import mesh..."))
+		{
+			actions.ImportMesh();
+		}
+
+		ImGui::Separator();
+
 		if (ImGui::MenuItem("Player spawn at camera"))
 		{
 			actions.PlaceSpawnAtCamera();

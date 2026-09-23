@@ -114,3 +114,11 @@ target_link_libraries(imguizmo PUBLIC imgui)
 
 add_library(imguizmo::imguizmo ALIAS imguizmo)
 # --------------
+
+# cgltf --------------
+add_library(cgltf INTERFACE)
+
+target_include_directories(cgltf SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/cgltf")
+
+add_library(cgltf::cgltf ALIAS cgltf)
+# --------------

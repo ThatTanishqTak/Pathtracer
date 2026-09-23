@@ -97,6 +97,7 @@ target_link_libraries(${TARGET_NAME}
         spdlog
         nlohmann_json::nlohmann_json
         imgui
+        cgltf::cgltf
 )
 
 # Engine properties

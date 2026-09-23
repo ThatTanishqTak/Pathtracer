@@ -20,11 +20,11 @@ namespace Engine
 		static constexpr std::string_view k_CubeSource = "builtin:cube";
 		static constexpr std::string_view k_IcosphereSource = "builtin:icosphere";
 
-		// Relative file sources resolve against this once the importer lands, the built-in sources never touch it
+		// Relative file sources resolve against this, the built-in sources never touch it. The working directory is never consulted, so a relative source with no root set is refused
 		void SetAssetRoot(std::filesystem::path root) { m_AssetRoot = std::move(root); }
 		const std::filesystem::path& GetAssetRoot() const { return m_AssetRoot; }
 
-		// Resolves a source to a mesh, loading it on first use, and returns its Id. The same source always returns the same Id. Invalid, with the reason in error when one is given, for an unknown source or a mesh that failed validation
+		// Resolves a source to a mesh, loading it on first use, and returns its Id. The same source always returns the same Id. A source is a built-in name or a glTF path in UTF-8, relative to the asset root or absolute, imported through ImportGltfMesh. Invalid, with the reason in error when one is given, for an unknown built-in, a file that cannot be imported or a mesh that failed validation
 		MeshId LoadMesh(std::string_view source, std::string* error = nullptr);
 
 		// Invalid when the source was never loaded
@@ -39,6 +39,7 @@ namespace Engine
 
 	private:
 		bool GenerateBuiltinMesh(std::string_view source, Mesh& mesh, std::string& error) const;
+		bool ImportMeshFile(std::string_view source, Mesh& mesh, std::string& error) const;
 		MeshId AddMesh(Mesh mesh, std::string& error);
 
 		std::filesystem::path m_AssetRoot;

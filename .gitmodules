@@ -22,3 +22,6 @@
 [submodule "Vendor/ImGuizmo"]
 	path = Vendor/ImGuizmo
 	url = https://github.com/ThatTanishqTak/ImGuizmo.git
+[submodule "Vendor/cgltf"]
+	path = Vendor/cgltf
+	url = https://github.com/ThatTanishqTak/cgltf.git

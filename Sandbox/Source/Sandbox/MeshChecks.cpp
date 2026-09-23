@@ -2,8 +2,16 @@
 
 #include "Engine/Engine.hpp"
 
+#include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <span>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace Sandbox
 {
@@ -13,6 +21,98 @@ namespace Sandbox
 		using Engine::Math::Vector3;
 
 		constexpr float k_Tolerance = 1e-4f;
+
+		// A glTF buffer is little-endian bytes, which is the byte order of every platform this builds on
+		void AppendFloats(std::vector<std::byte>& bytes, std::span<const float> values)
+		{
+			for (const float l_Value : values)
+			{
+				const auto l_Bytes = std::bit_cast<std::array<std::byte, 4>>(l_Value);
+				bytes.insert(bytes.end(), l_Bytes.begin(), l_Bytes.end());
+			}
+		}
+
+		void AppendIndices(std::vector<std::byte>& bytes, std::span<const uint16_t> values)
+		{
+			for (const uint16_t l_Value : values)
+			{
+				const auto l_Bytes = std::bit_cast<std::array<std::byte, 2>>(l_Value);
+				bytes.insert(bytes.end(), l_Bytes.begin(), l_Bytes.end());
+			}
+		}
+
+		std::string EncodeBase64(std::span<const std::byte> bytes)
+		{
+			constexpr std::string_view k_Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+			std::string l_Encoded;
+			for (size_t i_Byte = 0; i_Byte < bytes.size(); i_Byte += 3)
+			{
+				const size_t l_Count = std::min<size_t>(3, bytes.size() - i_Byte);
+
+				uint32_t l_Chunk = 0;
+				for (size_t i_Offset = 0; i_Offset < 3; ++i_Offset)
+				{
+					l_Chunk = (l_Chunk << 8) | (i_Offset < l_Count ? static_cast<uint32_t>(bytes[i_Byte + i_Offset]) : 0u);
+				}
+
+				l_Encoded += k_Alphabet[(l_Chunk >> 18) & 63];
+				l_Encoded += k_Alphabet[(l_Chunk >> 12) & 63];
+				l_Encoded += l_Count > 1 ? k_Alphabet[(l_Chunk >> 6) & 63] : '=';
+				l_Encoded += l_Count > 2 ? k_Alphabet[l_Chunk & 63] : '=';
+			}
+
+			return l_Encoded;
+		}
+
+		// A unit quad in the XY plane, ±0.5, normals along +Z, wound counter-clockwise seen from +Z, as one embedded glTF document: positions at buffer view 0, normals at 1, texture coordinates at 2, six 16-bit indices at 3. The caller writes the nodes, one flat object each so the brace count is the node count, and may drop the normals or add to the primitive and the document
+		std::string BuildQuadDocument(std::string_view nodes, bool withNormals, std::string_view primitiveExtra, std::string_view documentExtra)
+		{
+			constexpr std::array<float, 12> k_Positions{ -0.5f, -0.5f, 0.0f, 0.5f, -0.5f, 0.0f, 0.5f, 0.5f, 0.0f, -0.5f, 0.5f, 0.0f };
+			constexpr std::array<float, 12> k_Normals{ 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f };
+			constexpr std::array<float, 8> k_TexCoords{ 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f };
+			constexpr std::array<uint16_t, 6> k_Indices{ 0, 1, 2, 0, 2, 3 };
+
+			std::vector<std::byte> l_Bytes;
+			AppendFloats(l_Bytes, k_Positions);
+			AppendFloats(l_Bytes, k_Normals);
+			AppendFloats(l_Bytes, k_TexCoords);
+			AppendIndices(l_Bytes, k_Indices);
+
+			std::string l_Document = "{\"asset\":{\"version\":\"2.0\"},";
+			l_Document += documentExtra;
+			l_Document += "\"scene\":0,\"scenes\":[{\"nodes\":[";
+			for (size_t i_Node = 0; i_Node < static_cast<size_t>(std::count(nodes.begin(), nodes.end(), '{')); ++i_Node)
+			{
+				l_Document += i_Node == 0 ? std::to_string(i_Node) : "," + std::to_string(i_Node);
+			}
+
+			l_Document += "]}],\"nodes\":[";
+			l_Document += nodes;
+			l_Document += "],\"meshes\":[{\"name\":\"Quad\",\"primitives\":[{\"attributes\":{\"POSITION\":0,";
+			if (withNormals)
+			{
+				l_Document += "\"NORMAL\":1,";
+			}
+
+			l_Document += "\"TEXCOORD_0\":2},\"indices\":3";
+			l_Document += primitiveExtra;
+			l_Document += "}]}],";
+			l_Document += "\"accessors\":[";
+			l_Document += "{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\",\"min\":[-0.5,-0.5,0.0],\"max\":[0.5,0.5,0.0]},";
+			l_Document += "{\"bufferView\":1,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\"},";
+			l_Document += "{\"bufferView\":2,\"componentType\":5126,\"count\":4,\"type\":\"VEC2\"},";
+			l_Document += "{\"bufferView\":3,\"componentType\":5123,\"count\":6,\"type\":\"SCALAR\"}],";
+			l_Document += "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":48},{\"buffer\":0,\"byteOffset\":48,\"byteLength\":48},{\"buffer\":0,\"byteOffset\":96,\"byteLength\":32},{\"buffer\":0,\"byteOffset\":128,\"byteLength\":12}],";
+			l_Document += "\"buffers\":[{\"byteLength\":" + std::to_string(l_Bytes.size()) + ",\"uri\":\"data:application/octet-stream;base64," + EncodeBase64(l_Bytes) + "\"}]}";
+
+			return l_Document;
+		}
+
+		bool ImportDocument(const std::string& document, Engine::Mesh& mesh, std::string& error)
+		{
+			return Engine::ImportGltfMeshFromMemory(std::as_bytes(std::span(document)), "Check", mesh, error);
+		}
 
 		bool Check(bool passed, const char* name)
 		{
@@ -200,7 +300,7 @@ namespace Sandbox
 			l_AllPassed = Check(l_TransformedHit && l_NearestWins && l_NoAssets.Entity == EntityId::Invalid, "a transformed cube is picked at its face, the nearer of two entities sharing the mesh wins, and no assets means no pick") && l_AllPassed;
 		}
 
-		// 7. The manager hands the same source the same Id, refuses a file source until the importer lands, and refuses an unknown built-in by name
+		// 7. The manager hands the same source the same Id, refuses a relative file source while no asset root is set rather than looking in the working directory, and refuses an unknown built-in by name
 		{
 			AssetManager l_Assets;
 			std::string l_Error;
@@ -208,10 +308,76 @@ namespace Sandbox
 			const MeshId l_First = l_Assets.LoadMesh(AssetManager::k_IcosphereSource);
 			const MeshId l_Second = l_Assets.LoadMesh(AssetManager::k_IcosphereSource);
 			const MeshId l_File = l_Assets.LoadMesh("Meshes/Missing.gltf", &l_Error);
-			const bool l_FileRefused = l_File == MeshId::Invalid && !l_Error.empty();
+			const bool l_FileRefused = l_File == MeshId::Invalid && l_Error.contains("asset root");
 			const MeshId l_Unknown = l_Assets.LoadMesh("builtin:teapot", &l_Error);
 
 			l_AllPassed = Check(l_First != MeshId::Invalid && l_First == l_Second && l_Assets.GetMeshes().size() == 1 && l_FileRefused && l_Unknown == MeshId::Invalid, "the asset manager shares one mesh per source and refuses what it cannot load") && l_AllPassed;
+		}
+
+		// 8. The importer folds the node transforms in: the quad under two nodes, one moved to +Z and one mirrored in X and moved to -Z, is one mesh of eight vertices and four triangles whose normals all still point +Z, whose mirrored triangles were rewound so their geometric normal agrees, and whose texture coordinates came through
+		{
+			Mesh l_Imported;
+			std::string l_Error;
+			const bool l_Loaded = ImportDocument(BuildQuadDocument("{\"mesh\":0,\"translation\":[0,0,1]},{\"mesh\":0,\"scale\":[-1,1,1],\"translation\":[0,0,-1]}", true, "", ""), l_Imported, l_Error);
+
+			bool l_Correct = l_Loaded && ValidateMesh(l_Imported, l_Error) && l_Imported.Vertices.size() == 8 && l_Imported.GetTriangleCount() == 4 && Near(l_Imported.Bounds.Min, Vector3(-0.5f, -0.5f, -1.0f)) && Near(l_Imported.Bounds.Max, Vector3(0.5f, 0.5f, 1.0f));
+			for (size_t i_Vertex = 0; l_Correct && i_Vertex < 4; ++i_Vertex)
+			{
+				const MeshVertex& l_Moved = l_Imported.Vertices[i_Vertex];
+				const MeshVertex& l_Mirrored = l_Imported.Vertices[i_Vertex + 4];
+
+				l_Correct = Near(l_Moved.Normal, Vector3(0.0f, 0.0f, 1.0f)) && Near(l_Mirrored.Normal, Vector3(0.0f, 0.0f, 1.0f)) && Math::NearlyEqual(l_Mirrored.Position.x, -l_Moved.Position.x) && l_Moved.TexCoord == l_Mirrored.TexCoord;
+			}
+
+			for (size_t i_Index = 0; l_Correct && i_Index + 2 < l_Imported.Indices.size(); i_Index += 3)
+			{
+				const MeshVertex& l_V0 = l_Imported.Vertices[l_Imported.Indices[i_Index]];
+				const MeshVertex& l_V1 = l_Imported.Vertices[l_Imported.Indices[i_Index + 1]];
+				const MeshVertex& l_V2 = l_Imported.Vertices[l_Imported.Indices[i_Index + 2]];
+
+				l_Correct = glm::dot(glm::cross(l_V1.Position - l_V0.Position, l_V2.Position - l_V0.Position), l_V0.Normal) > 0.0f;
+			}
+
+			if (!l_Loaded)
+			{
+				PT_APP_ERROR("Import failed: {}", l_Error);
+			}
+
+			l_AllPassed = Check(l_Correct, "an imported glTF folds the node transforms into one mesh, rewinds a mirrored node and keeps the normals and texture coordinates") && l_AllPassed;
+		}
+
+		// 9. A primitive without normals gets flat ones: the quad turned a quarter about X so its face looks along -Y, unrolled to six vertices carrying that normal
+		{
+			Mesh l_Imported;
+			std::string l_Error;
+			const bool l_Loaded = ImportDocument(BuildQuadDocument("{\"mesh\":0,\"rotation\":[0.7071068,0,0,0.7071068]}", false, "", ""), l_Imported, l_Error);
+
+			bool l_Flat = l_Loaded && ValidateMesh(l_Imported, l_Error) && l_Imported.Vertices.size() == 6 && l_Imported.GetTriangleCount() == 2;
+			for (size_t i_Vertex = 0; l_Flat && i_Vertex < l_Imported.Vertices.size(); ++i_Vertex)
+			{
+				l_Flat = Near(l_Imported.Vertices[i_Vertex].Normal, Vector3(0.0f, -1.0f, 0.0f));
+			}
+
+			if (!l_Loaded)
+			{
+				PT_APP_ERROR("Import failed: {}", l_Error);
+			}
+
+			l_AllPassed = Check(l_Flat, "an imported primitive without normals is unrolled with flat normals through the node's rotation") && l_AllPassed;
+		}
+
+		// 10. What the subset does not cover is refused by name: a points primitive, a required extension, and a morph target
+		{
+			Mesh l_Unused;
+			std::string l_ModeError;
+			std::string l_ExtensionError;
+			std::string l_TargetError;
+
+			const bool l_ModeRefused = !ImportDocument(BuildQuadDocument("{\"mesh\":0}", true, ",\"mode\":0", ""), l_Unused, l_ModeError) && l_ModeError.contains("points");
+			const bool l_ExtensionRefused = !ImportDocument(BuildQuadDocument("{\"mesh\":0}", true, "", "\"extensionsRequired\":[\"KHR_draco_mesh_compression\"],"), l_Unused, l_ExtensionError) && l_ExtensionError.contains("KHR_draco_mesh_compression");
+			const bool l_TargetRefused = !ImportDocument(BuildQuadDocument("{\"mesh\":0}", true, ",\"targets\":[{\"POSITION\":0}]", ""), l_Unused, l_TargetError) && l_TargetError.contains("morph");
+
+			l_AllPassed = Check(l_ModeRefused && l_ExtensionRefused && l_TargetRefused, "the importer refuses a points primitive, a required extension and a morph target by name") && l_AllPassed;
 		}
 
 		if (l_AllPassed)

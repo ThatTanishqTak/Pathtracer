@@ -31,6 +31,7 @@ namespace Editor
 
 		bool OnCloseRequested() override;
 		void CreateEntity(CreateEntityKind kind) override;
+		void ImportMesh() override;
 		void RenameEntity(Engine::EntityId id, std::string name) override;
 		void DuplicateEntity(Engine::EntityId id) override;
 		void DeleteEntity(Engine::EntityId id) override;
@@ -44,6 +45,13 @@ namespace Editor
 			OpenScene,
 			LaunchSandbox,
 			Exit,
+		};
+
+		// What the open dialog was shown for, the result only says that it was an open dialog
+		enum class OpenDialogPurpose : uint8_t
+		{
+			Scene,
+			MeshImport,
 		};
 
 		std::filesystem::path ResolveScenePath(const std::filesystem::path& path) const;
@@ -80,6 +88,8 @@ namespace Editor
 		void PickEntity(float mouseX, float mouseY);
 		void SetFileStatus(std::string summary, const Engine::SceneFileResult& result);
 
+		void ImportMeshFrom(const std::filesystem::path& path);
+		void ExecuteCreate(Engine::Entity entity, Engine::Material material);
 		Engine::Math::Vector3 GetCreatePosition() const;
 
 		Engine::ApplicationServices* m_Services = nullptr;
@@ -101,6 +111,7 @@ namespace Editor
 		uint32_t m_CreatedEntities = 0;
 
 		PendingAction m_PendingAction = PendingAction::None;
+		OpenDialogPurpose m_OpenDialogPurpose = OpenDialogPurpose::Scene;
 		bool m_OpenPromptRequested = false;
 		bool m_PromptOpen = false;
 		bool m_RunPendingAfterSave = false;

@@ -34,7 +34,7 @@ namespace Engine
 	{
 		MeshId Id = MeshId::Invalid;
 		std::string Name;
-		std::string Source; // What the AssetManager loaded it from and what a scene file stores: "builtin:cube", "builtin:icosphere", later a path under the asset root
+		std::string Source; // What the AssetManager loaded it from and what a scene file stores: "builtin:cube", "builtin:icosphere", or a glTF path, relative to the asset root or absolute
 
 		std::vector<MeshVertex> Vertices;
 		std::vector<uint32_t> Indices;

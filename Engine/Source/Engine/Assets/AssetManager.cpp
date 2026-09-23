@@ -1,6 +1,7 @@
 #include "Engine/Assets/AssetManager.hpp"
 
 #include "Engine/Assets/MeshGenerators.hpp"
+#include "Engine/Assets/MeshImporter.hpp"
 #include "Engine/Core/Log.hpp"
 
 #include <algorithm>
@@ -25,26 +26,11 @@ namespace Engine
 			return l_Existing;
 		}
 
+		// A built-in name is generated, anything else is a glTF path
 		Mesh l_Mesh;
-		if (source.starts_with(k_BuiltinPrefix))
+		const bool l_Loaded = source.starts_with(k_BuiltinPrefix) ? GenerateBuiltinMesh(source, l_Mesh, l_Error) : ImportMeshFile(source, l_Mesh, l_Error);
+		if (!l_Loaded)
 		{
-			if (!GenerateBuiltinMesh(source, l_Mesh, l_Error))
-			{
-				if (error != nullptr)
-				{
-					*error = l_Error;
-				}
-
-				PT_CORE_ERROR("Cannot load mesh '{}': {}", source, l_Error);
-
-				return MeshId::Invalid;
-			}
-		}
-		else
-		{
-			// The glTF importer is the next part of this step, until then a file source is refused by name rather than read as nothing
-			l_Error = "file sources are not supported yet, only the built-in meshes are";
-
 			if (error != nullptr)
 			{
 				*error = l_Error;
@@ -104,6 +90,32 @@ namespace Engine
 		error = std::format("unknown built-in mesh, expected \"{}\" or \"{}\"", k_CubeSource, k_IcosphereSource);
 
 		return false;
+	}
+
+	bool AssetManager::ImportMeshFile(std::string_view source, Mesh& mesh, std::string& error) const
+	{
+		// The source is UTF-8, as the scene file is; a relative path lives under the asset root and never under the working directory
+		std::filesystem::path l_Path(std::u8string_view(reinterpret_cast<const char8_t*>(source.data()), source.size()));
+		if (!l_Path.is_absolute())
+		{
+			if (m_AssetRoot.empty())
+			{
+				error = "a relative path needs an asset root and none is set";
+
+				return false;
+			}
+
+			l_Path = m_AssetRoot / l_Path;
+		}
+
+		if (!ImportGltfMesh(l_Path, mesh, error))
+		{
+			error = std::format("{} ({})", error, l_Path.string());
+
+			return false;
+		}
+
+		return true;
 	}
 
 	MeshId AssetManager::AddMesh(Mesh mesh, std::string& error)
